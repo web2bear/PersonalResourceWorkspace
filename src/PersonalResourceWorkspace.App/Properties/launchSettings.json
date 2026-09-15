@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "PersonalResourceWorkspace.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "PersonalResourceWorkspace.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

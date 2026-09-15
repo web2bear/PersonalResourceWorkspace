@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PersonalResourceWorkspace.App/PersonalResourceWorkspace.App.csproj" />
+    <Project Path="src/PersonalResourceWorkspace.Application/PersonalResourceWorkspace.Application.csproj" />
+    <Project Path="src/PersonalResourceWorkspace.Domain/PersonalResourceWorkspace.Domain.csproj" />
+    <Project Path="src/PersonalResourceWorkspace.Infrastructure/PersonalResourceWorkspace.Infrastructure.csproj" />
+    <Project Path="src/PersonalResourceWorkspace.Windows/PersonalResourceWorkspace.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PersonalResourceWorkspace.Application.Tests/PersonalResourceWorkspace.Application.Tests.csproj" />
+    <Project Path="tests/PersonalResourceWorkspace.Domain.Tests/PersonalResourceWorkspace.Domain.Tests.csproj" />
+    <Project Path="tests/PersonalResourceWorkspace.Infrastructure.Tests/PersonalResourceWorkspace.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
