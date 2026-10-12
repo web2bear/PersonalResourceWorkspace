@@ -19,7 +19,7 @@ The app is under active development. The image shows one example workspace; your
 
 ## Try it
 
-The project currently runs from source on Windows. There is no ready-to-install release in this repository. See [build and run](development.md) for the required tools and steps.
+Download the [v0.1.1 prerelease for Windows x64](https://github.com/web2bear/PersonalResourceWorkspace/releases/tag/v0.1.1), extract the entire ZIP, and run `PersonalResourceWorkspace.App.exe`. This is a portable build without an installer or digital signature. You can also [build from source](development.md).
 
 ## Ideas for the future
 

@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish, e.g. 0.1.1 (without the v prefix)"
+        description: "Version to publish, e.g. 0.1.2 (without the v prefix)"
         required: true
-        default: "0.1.1"
+        default: "0.1.2"
       create_release:
         description: "Create a prerelease with the portable Windows x64 build"
         type: boolean
