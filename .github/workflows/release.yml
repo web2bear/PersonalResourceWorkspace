@@ -1,0 +1,133 @@
+name: Build, Test & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. 0.1.0"
+        required: true
+        default: "0.1.0"
+      create_release:
+        description: "Create a GitHub Release with the published build"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  SOLUTION: PersonalResourceWorkspace.slnx
+  APP_PROJECT: src/PersonalResourceWorkspace.App/PersonalResourceWorkspace.App.csproj
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          $v = ""
+          if ("$env:GITHUB_REF_TYPE" -eq "tag") {
+            $v = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          if (-not $v) { $v = "${{ inputs.version }}" }
+          if (-not $v) { $v = "0.0.0.${{ github.run_number }}" }
+          if ($v -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
+            throw "Version '$v' is not in x.y.z form"
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$v"
+          Write-Host "Building version $v"
+
+      - name: Restore
+        run: dotnet restore "$env:SOLUTION"
+
+      - name: Build
+        run: dotnet build "$env:SOLUTION" -c Release --no-restore
+
+      - name: Test
+        run: dotnet test "$env:SOLUTION" -c Release --no-build --no-restore
+
+  publish:
+    name: Publish (${{ matrix.rid }})
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-x86, win-arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $version = "${{ needs.test.outputs.version }}"
+          dotnet publish "$env:APP_PROJECT" `
+            -c Release -r ${{ matrix.rid }} --self-contained true `
+            -o "artifacts/${{ matrix.rid }}" `
+            -p:Version=$version `
+            -p:FileVersion=$version `
+            -p:InformationalVersion=$version
+
+      - name: Zip published build
+        shell: pwsh
+        run: |
+          $zip = "artifacts/PersonalResourceWorkspace-${{ matrix.rid }}-${{ needs.test.outputs.version }}.zip"
+          Compress-Archive -Path "artifacts/${{ matrix.rid }}/*" -DestinationPath $zip -Force
+          Get-Item $zip | Select-Object FullName, Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PersonalResourceWorkspace-${{ matrix.rid }}-${{ needs.test.outputs.version }}
+          path: artifacts/PersonalResourceWorkspace-${{ matrix.rid }}-${{ needs.test.outputs.version }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [publish, test]
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PersonalResourceWorkspace-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', needs.test.outputs.version) }}
+          name: Personal Resource Workspace ${{ needs.test.outputs.version }}
+          files: release-assets/*
+          generate_release_notes: true
