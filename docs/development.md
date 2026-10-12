@@ -22,3 +22,7 @@ dotnet run --project src/PersonalResourceWorkspace.App/PersonalResourceWorkspace
 ```
 
 Данные приложения находятся в `%LOCALAPPDATA%\PersonalResourceWorkspace`; при повторном запуске каталог сохраняется. / App data lives in `%LOCALAPPDATA%\PersonalResourceWorkspace` and persists across launches.
+
+## Выпуск версий / Releases
+
+Процесс подготовки ZIP и GitHub Release описан в [руководстве по выпуску](releasing.md). / See the [release guide](releasing.md) for the ZIP and GitHub Release workflow.
