@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "69ceb697-cb45-4765-a77e-a665b217fa12",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "F:\\GitHub\\PersonalResourceWorkspace\\.archify\\architecture-personal-resource-workspace-20261009-201415\\candidate.json",
+  "output": "F:\\GitHub\\PersonalResourceWorkspace\\.archify\\architecture-personal-resource-workspace-20261009-201415\\personal-resource-workspace.html",
+  "specification": {
+    "sha256": "e1fe3c1a5961a2231f5ca6aa6f1cc58c0c5b2b8a80db8d57aca031fa9f453ad7",
+    "bytes": 46304
+  },
+  "artifact": {
+    "sha256": "67bef92e50f66bc1fcbbd99fdf9ba1805ccbb7724de78bd6587b885050e572e0",
+    "bytes": 784052
+  }
+}
