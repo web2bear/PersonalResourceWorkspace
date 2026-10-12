@@ -57,8 +57,10 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$v"
           Write-Host "Building version $v"
 
+      # Restore with the app's implicit RID so the win-x64 runtime pack is
+      # downloaded (the App project defaults RuntimeIdentifier to win-x64).
       - name: Restore
-        run: dotnet restore "$env:SOLUTION"
+        run: dotnet restore "$env:SOLUTION" -r win-x64
 
       - name: Build
         run: dotnet build "$env:SOLUTION" -c Release --no-restore
