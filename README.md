@@ -1,47 +1,38 @@
 # Personal Resource Workspace
 
-Foundation for a local-first Windows application built with C#, .NET 9, WinUI 3, Windows App SDK 2.4.0, and SQLite.
+**Все ресурсы. Одно пространство.** Локальное приложение для Windows, в котором ссылки, файлы, папки, программы и заметки собраны в одном визуальном каталоге.
 
-[`PROJECT.md`](PROJECT.md) is the normative product and technical contract. This repository currently implements Phase 0 only: official WinUI scaffold, architectural boundaries, dependency injection, logging, tests, and a safe migration foundation. Product features belong to later phases.
+[English](docs/README.en.md) · [Запуск из исходников](docs/development.md) · [Устройство проекта](docs/architecture.md)
 
-## Requirements
+![Personal Resource Workspace — общий вид приложения](assets/personal-resource-workspace.png)
 
-- Windows 10 version 1809 (build 17763) or newer
-- .NET SDK 9.0.318 or a compatible 9.0 patch selected by `global.json`
-- Windows SDK 10.0.26100 or newer
+## Что уже работает
 
-The application uses self-contained unpackaged deployment. The audited execution environment cannot register a loose-layout MSIX because its sandbox token has no deployable user-profile type. This model enables a repeatable CLI launch without a machine-wide Windows App Runtime prerequisite; see ADR 0001.
+- **Всё под рукой:** добавляйте веб-ссылки, файлы, папки, приложения, текстовые и графические фрагменты, команды. Ресурсы сохраняются локально и доступны после перезапуска.
+- **Узнаваемые карточки:** смотрите ресурсы в сетке с обложками, значками и превью либо переключайтесь на компактный список.
+- **Удобная организация:** создавайте коллекции, задавайте им цвет и значок, отмечайте важное как избранное. Раздел «Все ресурсы» показывает содержимое целиком.
+- **Быстрый доступ:** ищите по каталогу и сортируйте по названию или дате изменения. Открывайте ресурсы из карточки и редактируйте их через контекстное меню.
+- **Простое добавление:** перетаскивайте файлы, папки и веб-ссылки в окно. При создании ресурса приложение может подставить содержимое буфера обмена.
+- **Корзина:** случайно удалённый ресурс сначала попадает в корзину; её можно очистить отдельно.
 
-## Build and test
+Приложение находится в активной разработке. Скриншот показывает один из вариантов наполнения личного пространства; ваши данные и карточки будут другими.
 
-```powershell
-dotnet restore PersonalResourceWorkspace.slnx
-dotnet build PersonalResourceWorkspace.slnx -c Debug --no-restore
-dotnet test PersonalResourceWorkspace.slnx -c Debug --no-build
-```
+## Попробовать
 
-## Run
+Сейчас проект запускается из исходников на Windows. Готового установщика в репозитории нет. Инструкции и необходимые инструменты — в [руководстве по запуску](docs/development.md).
 
-Double-click `run.bat` in the repository root. It starts the existing Debug x64 build and builds it first when the executable is missing. Use `run.bat --build` to force a rebuild, or use the CLI:
+## Идеи на будущее
 
-```powershell
-dotnet run --project src/PersonalResourceWorkspace.App/PersonalResourceWorkspace.App.csproj -c Debug -r win-x64
-```
+Это направления развития, **не реализованные функции и не обещание сроков**:
 
-`dotnet run` launches the self-contained executable directly.
+- вложенные коллекции и более гибкое перемещение ресурсов между ними;
+- ручной порядок карточек и дополнительные способы навигации;
+- быстрый вызов пространства глобальной горячей клавишей;
+- более удобная работа с текстовыми и графическими фрагментами;
+- дополнительные настройки внешнего вида и сценариев запуска.
 
-## Structure
+Предложения и сообщения об ошибках можно оставлять в [Issues](https://github.com/web2bear/PersonalResourceWorkspace/issues), если они включены для репозитория.
 
-- `src/PersonalResourceWorkspace.App` — WinUI startup, XAML, and the DI composition root.
-- `src/PersonalResourceWorkspace.Domain` — dependency-free domain boundary.
-- `src/PersonalResourceWorkspace.Application` — use-case contracts and ports.
-- `src/PersonalResourceWorkspace.Infrastructure` — SQLite, filesystem, migrations, and search adapters.
-- `src/PersonalResourceWorkspace.Windows` — Windows-only activation, clipboard, hotkey, shell, and visual adapters.
-- `tests` — unit and isolated SQLite integration tests.
-- `docs/adr` — durable architecture decisions.
+## О проекте
 
-## Local data and migrations
-
-Local data is rooted at `%LOCALAPPDATA%/PersonalResourceWorkspace`. The SQLite database is stored at `Data/workspace.db` below that app-owned root. User-selected resource and collection images are copied to `Data/Visuals/user`; reproducible Windows shell and web previews are cached under `Data/Visuals/cache`. SQLite stores only their relative logical paths and visual-selection metadata.
-
-Startup creates only `SchemaMigrations` and records migration version `1`. Each connection explicitly enables foreign keys. Migrations run transactionally; an error is rolled back and the database is never silently deleted or recreated. Tests use a unique temporary directory and never touch user data.
+Проект развивается как личное локальное пространство для ресурсов: основные сценарии не требуют учётной записи или облачного сервиса. Текущие ограничения, сборка и устройство кода описаны отдельно: [разработка](docs/development.md), [архитектура](docs/architecture.md), [спецификация и долгосрочные цели](PROJECT.md).
