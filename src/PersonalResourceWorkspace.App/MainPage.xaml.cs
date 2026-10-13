@@ -1115,14 +1115,18 @@ public sealed partial class MainPage : Page
         try
         {
             await _resourceLaunchService.LaunchAsync(kind, address, CancellationToken.None);
-            StatusText.Text = $"Открывается: {address.Trim()}";
+            StatusText.Text = ResourceTypeMapper.FromStoredKind(kind) == ResourceType.TextSnippet
+                ? "Текст заметки скопирован в буфер обмена"
+                : $"Открывается: {address.Trim()}";
         }
         catch (Exception exception)
         {
             var errorDialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = "Не удалось открыть ресурс",
+                Title = ResourceTypeMapper.FromStoredKind(kind) == ResourceType.TextSnippet
+                    ? "Не удалось скопировать заметку"
+                    : "Не удалось открыть ресурс",
                 Content = exception.Message,
                 CloseButtonText = "Закрыть",
             };

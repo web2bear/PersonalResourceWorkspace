@@ -10,7 +10,7 @@ public sealed class ResourceLaunchServiceTests
     public async Task LaunchAsyncOpensHttpUriInBrowser()
     {
         var launcher = new FakeShellLauncher();
-        var service = new ResourceLaunchService(launcher);
+        var service = new ResourceLaunchService(launcher, new FakeClipboardTextWriter());
 
         await service.LaunchAsync(StoredResourceKinds.Web, "https://example.com/docs", CancellationToken.None);
 
@@ -23,7 +23,7 @@ public sealed class ResourceLaunchServiceTests
     public async Task LaunchAsyncNormalizesSchemeLessWebAddress()
     {
         var launcher = new FakeShellLauncher();
-        var service = new ResourceLaunchService(launcher);
+        var service = new ResourceLaunchService(launcher, new FakeClipboardTextWriter());
 
         await service.LaunchAsync(StoredResourceKinds.LegacyWeb, "example.com", CancellationToken.None);
 
@@ -34,7 +34,7 @@ public sealed class ResourceLaunchServiceTests
     public async Task LaunchAsyncRejectsNonHttpWebAddress()
     {
         var launcher = new FakeShellLauncher();
-        var service = new ResourceLaunchService(launcher);
+        var service = new ResourceLaunchService(launcher, new FakeClipboardTextWriter());
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.LaunchAsync(StoredResourceKinds.Web, "javascript:alert(1)", CancellationToken.None));
@@ -47,7 +47,7 @@ public sealed class ResourceLaunchServiceTests
     public async Task LaunchAsyncOpensFilePath()
     {
         var launcher = new FakeShellLauncher();
-        var service = new ResourceLaunchService(launcher);
+        var service = new ResourceLaunchService(launcher, new FakeClipboardTextWriter());
 
         await service.LaunchAsync(StoredResourceKinds.File, @"C:\docs\file.txt", CancellationToken.None);
 
@@ -61,6 +61,51 @@ public sealed class ResourceLaunchServiceTests
         Assert.Equal(ResourceType.Web, ResourceTypeMapper.FromStoredKind(StoredResourceKinds.LegacyWeb));
         Assert.Equal(StoredResourceKinds.Web, ResourceTypeMapper.NormalizeStoredKind(StoredResourceKinds.LegacyWeb));
         Assert.Equal("\uE71B", ResourceTypeMapper.GlyphForStoredKind(StoredResourceKinds.Web));
+    }
+
+    [Fact]
+    public async Task LaunchAsyncCopiesNoteExactlyOnceWithoutOpeningShell()
+    {
+        var launcher = new FakeShellLauncher();
+        var clipboard = new FakeClipboardTextWriter();
+        var service = new ResourceLaunchService(launcher, clipboard);
+        const string content = "  первая строка\r\nвторая строка  ";
+
+        await service.LaunchAsync(StoredResourceKinds.Note, content, CancellationToken.None);
+
+        Assert.Equal(content, clipboard.LastText);
+        Assert.Equal(1, clipboard.WriteCount);
+        Assert.Null(launcher.LastPath);
+        Assert.Null(launcher.LastUri);
+    }
+
+    [Fact]
+    public async Task LaunchAsyncDoesNotCopyCancelledNote()
+    {
+        var clipboard = new FakeClipboardTextWriter();
+        var service = new ResourceLaunchService(new FakeShellLauncher(), clipboard);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.LaunchAsync(StoredResourceKinds.Note, "text", cancellation.Token));
+
+        Assert.Equal(0, clipboard.WriteCount);
+    }
+
+    [Fact]
+    public async Task LaunchAsyncPropagatesClipboardErrorWithoutShellFallback()
+    {
+        var launcher = new FakeShellLauncher();
+        var clipboard = new FakeClipboardTextWriter { Error = new InvalidOperationException("clipboard unavailable") };
+        var service = new ResourceLaunchService(launcher, clipboard);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.LaunchAsync(StoredResourceKinds.Note, "text", CancellationToken.None));
+
+        Assert.Equal(1, clipboard.WriteCount);
+        Assert.Null(launcher.LastPath);
+        Assert.Null(launcher.LastUri);
     }
 
     [Theory]
@@ -93,6 +138,21 @@ public sealed class ResourceLaunchServiceTests
         public Task OpenPathAsync(string path, CancellationToken cancellationToken)
         {
             LastPath = path;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeClipboardTextWriter : IClipboardTextWriter
+    {
+        public string? LastText { get; private set; }
+        public int WriteCount { get; private set; }
+        public Exception? Error { get; init; }
+
+        public Task WriteTextAsync(string text, CancellationToken cancellationToken)
+        {
+            WriteCount++;
+            if (Error is not null) throw Error;
+            LastText = text;
             return Task.CompletedTask;
         }
     }

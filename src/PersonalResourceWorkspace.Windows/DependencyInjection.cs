@@ -14,6 +14,7 @@ public static class DependencyInjection
         services.AddSingleton<IAppDataPathProvider, UnpackagedAppDataPathProvider>();
         services.AddSingleton<ICollectionViewPreferenceStore, FileCollectionViewPreferenceStore>();
         services.AddSingleton<IClipboardService, WindowsClipboardService>();
+        services.AddSingleton<IClipboardTextWriter, WindowsClipboardTextWriter>();
         services.AddSingleton<IShellLauncher, WindowsShellLauncher>();
         services.AddSingleton<IResourceVisualService, WindowsResourceVisualService>();
         return services;
