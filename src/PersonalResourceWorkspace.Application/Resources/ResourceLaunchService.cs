@@ -3,7 +3,7 @@ using PersonalResourceWorkspace.Domain.Resources;
 
 namespace PersonalResourceWorkspace.Application.Resources;
 
-public sealed class ResourceLaunchService(IShellLauncher shellLauncher)
+public sealed class ResourceLaunchService(IShellLauncher shellLauncher, IClipboardTextWriter clipboardTextWriter)
 {
     public async Task LaunchAsync(string kind, string address, CancellationToken cancellationToken)
     {
@@ -16,11 +16,14 @@ public sealed class ResourceLaunchService(IShellLauncher shellLauncher)
             case ResourceType.Application:
             case ResourceType.File:
             case ResourceType.Folder:
-            case ResourceType.TextSnippet:
             case ResourceType.ImageSnippet:
             case ResourceType.Command:
             case ResourceType.Collection:
                 await LaunchPathAsync(address, cancellationToken);
+                break;
+            case ResourceType.TextSnippet:
+                cancellationToken.ThrowIfCancellationRequested();
+                await clipboardTextWriter.WriteTextAsync(address, cancellationToken);
                 break;
             default:
                 ResourceType unreachable = type;

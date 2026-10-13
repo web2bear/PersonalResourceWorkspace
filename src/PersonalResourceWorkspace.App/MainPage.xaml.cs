@@ -166,18 +166,24 @@ public sealed partial class MainPage : Page
 
     private async void AddResource_Click(object sender, RoutedEventArgs e)
     {
-        var collection = GetDefaultCollection();
-        var draft = await TryReadClipboardDraftAsync();
-        var resource = draft is null
-            ? CreateEmptyResource(collection)
-            : ToWorkspaceResource(draft, collection);
-
-        if (await ShowResourceEditorAsync(resource, isNew: true))
+        try
         {
-            _resources.Insert(0, resource);
-            ApplyFilter();
-            await SaveResourcesAsync();
-            StatusText.Text = $"Добавлено: {resource.Title}";
+            var collection = GetDefaultCollection();
+            var draft = await TryReadClipboardDraftAsync();
+            var resource = draft is null
+                ? CreateEmptyResource(collection)
+                : ToWorkspaceResource(draft, collection);
+
+            if (await ShowResourceEditorAsync(resource, isNew: true))
+            {
+                _resources.Insert(0, resource);
+                ApplyFilter();
+                StatusText.Text = $"Добавлено: {resource.Title}";
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = $"Не удалось добавить ресурс: {exception.Message}";
         }
     }
 
@@ -1115,14 +1121,18 @@ public sealed partial class MainPage : Page
         try
         {
             await _resourceLaunchService.LaunchAsync(kind, address, CancellationToken.None);
-            StatusText.Text = $"Открывается: {address.Trim()}";
+            StatusText.Text = ResourceTypeMapper.FromStoredKind(kind) == ResourceType.TextSnippet
+                ? "Текст заметки скопирован в буфер обмена"
+                : $"Открывается: {address.Trim()}";
         }
         catch (Exception exception)
         {
             var errorDialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
-                Title = "Не удалось открыть ресурс",
+                Title = ResourceTypeMapper.FromStoredKind(kind) == ResourceType.TextSnippet
+                    ? "Не удалось скопировать заметку"
+                    : "Не удалось открыть ресурс",
                 Content = exception.Message,
                 CloseButtonText = "Закрыть",
             };
