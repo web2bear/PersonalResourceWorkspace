@@ -166,18 +166,24 @@ public sealed partial class MainPage : Page
 
     private async void AddResource_Click(object sender, RoutedEventArgs e)
     {
-        var collection = GetDefaultCollection();
-        var draft = await TryReadClipboardDraftAsync();
-        var resource = draft is null
-            ? CreateEmptyResource(collection)
-            : ToWorkspaceResource(draft, collection);
-
-        if (await ShowResourceEditorAsync(resource, isNew: true))
+        try
         {
-            _resources.Insert(0, resource);
-            ApplyFilter();
-            await SaveResourcesAsync();
-            StatusText.Text = $"Добавлено: {resource.Title}";
+            var collection = GetDefaultCollection();
+            var draft = await TryReadClipboardDraftAsync();
+            var resource = draft is null
+                ? CreateEmptyResource(collection)
+                : ToWorkspaceResource(draft, collection);
+
+            if (await ShowResourceEditorAsync(resource, isNew: true))
+            {
+                _resources.Insert(0, resource);
+                ApplyFilter();
+                StatusText.Text = $"Добавлено: {resource.Title}";
+            }
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = $"Не удалось добавить ресурс: {exception.Message}";
         }
     }
 
