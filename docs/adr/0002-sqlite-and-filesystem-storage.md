@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-09-10
 
+> Расположение пользовательских данных в этом ADR заменено целевым решением [ADR 0003](0003-portable-data-and-settings.md); до его реализации код продолжает использовать `%LOCALAPPDATA%`.
+
 ## Context
 
 The application is local-first and must preserve structured metadata safely while keeping large binary images outside the database.

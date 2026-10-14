@@ -2,7 +2,7 @@
 
 **Все ресурсы. Одно пространство.** Локальное приложение для Windows, в котором ссылки, файлы, папки, программы и заметки собраны в одном визуальном каталоге.
 
-[English](docs/README.en.md) · [Запуск из исходников](docs/development.md) · [Устройство проекта](docs/architecture.md)
+[English](docs/README.en.md) · [Сценарии пользователя](docs/user-stories.md) · [Запуск из исходников](docs/development.md) · [Устройство проекта](docs/architecture.md)
 
 ![Personal Resource Workspace — общий вид приложения](assets/personal-resource-workspace.png)
 
