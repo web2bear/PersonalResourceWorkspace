@@ -171,7 +171,10 @@
                 </GridView.ItemContainerStyle>
                 <GridView.ItemTemplate>
                     <DataTemplate x:DataType="local:WorkspaceResource">
-                        <Border Padding="10" AutomationProperties.HelpText="{x:Bind VisualSourceLabel, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                        <Border AutomationProperties.HelpText="{x:Bind VisualSourceLabel, Mode=OneWay}" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="10">
+                            <ToolTipService.ToolTip>
+                                <ToolTip><TextBlock MaxWidth="420" Text="{x:Bind HoverDescription, Mode=OneWay}" TextWrapping="Wrap" /></ToolTip>
+                            </ToolTipService.ToolTip>
                             <Border.ContextFlyout>
                                 <MenuFlyout>
                                     <MenuFlyoutItem Click="OpenResourceMenu_Click" Icon="OpenFile" Tag="{Binding}" Text="Открыть" />
@@ -179,22 +182,24 @@
                                     <MenuFlyoutItem AutomationProperties.Name="Удалить ресурс" Click="DeleteResourceMenu_Click" Icon="Delete" Tag="{Binding}" Text="Удалить" />
                                 </MenuFlyout>
                             </Border.ContextFlyout>
-                            <Grid RowSpacing="7">
-                                <Grid.RowDefinitions><RowDefinition Height="108" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                <Border Background="{x:Bind AccentBrush}" CornerRadius="8">
+                            <Grid RowSpacing="0">
+                                <Grid.RowDefinitions><RowDefinition Height="{x:Bind CardPreviewHeight, Mode=OneWay}" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <Border Background="{x:Bind AccentBrush}" CornerRadius="10,10,0,0">
                                     <Grid>
-                                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" Visibility="{x:Bind IconSurfaceVisibility, Mode=OneWay}" />
+                                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Visibility="{x:Bind IconSurfaceVisibility, Mode=OneWay}" />
                                         <Image Margin="{x:Bind VisualImageMargin, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw" Source="{x:Bind VisualImage, Mode=OneWay}" Stretch="{x:Bind VisualStretch, Mode=OneWay}" Visibility="{x:Bind VisualImageVisibility, Mode=OneWay}" />
                                         <TextBlock Margin="14" VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" MaxLines="3" Text="{x:Bind VisualPreviewText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind GeneratedPreviewVisibility, Mode=OneWay}" />
                                         <FontIcon FontSize="34" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" Glyph="{x:Bind Glyph}" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4" Click="DeleteResourceButton_Click" Tag="{Binding}" ToolTipService.ToolTip="Удалить ресурс" Visibility="{x:Bind CardDeleteVisibility, Mode=OneWay}">
+                                            <SymbolIcon Symbol="Delete" />
+                                        </Button>
                                     </Grid>
                                 </Border>
-                                <TextBlock Grid.Row="1" FontSize="14" FontWeight="SemiBold" MaxLines="1" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
-                                <Grid Grid.Row="2" ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind SourceOrType}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="1" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind Collection}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind CollectionContextVisibility, Mode=OneWay}" />
-                                </Grid>
+                                <StackPanel Grid.Row="1" Padding="8,7,8,6" Spacing="3">
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" MaxLines="{x:Bind CardTitleLines, Mode=OneWay}" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind CardTitleVisibility, Mode=OneWay}" />
+                                    <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="{x:Bind CardDescriptionLines, Mode=OneWay}" Text="{x:Bind Description}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind CardDescriptionVisibility, Mode=OneWay}" />
+                                    <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind SourceOrType}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind CardSourceVisibility, Mode=OneWay}" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </DataTemplate>
