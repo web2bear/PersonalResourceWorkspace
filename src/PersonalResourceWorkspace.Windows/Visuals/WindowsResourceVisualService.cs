@@ -72,7 +72,8 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
             request.Descriptor.Mode == ResourceVisualMode.Auto &&
             string.Equals(request.Descriptor.SourceFingerprint, fingerprint, StringComparison.Ordinal) &&
             cachedPath is not null &&
-            File.Exists(cachedPath))
+            File.Exists(cachedPath) &&
+            await IsDecodableImageAsync(cachedPath, cancellationToken).ConfigureAwait(false))
         {
             return new ResourceVisualResolution(request.Descriptor, cachedPath, null, SourceLabel(request.Descriptor.Origin));
         }
@@ -185,6 +186,11 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
 
         var extension = Path.GetExtension(address).ToLowerInvariant();
         var destination = CachePath(fingerprint, extension);
+        if (File.Exists(destination) &&
+            !await IsDecodableImageAsync(destination, cancellationToken).ConfigureAwait(false))
+        {
+            File.Delete(destination);
+        }
         await CopyIfMissingAsync(address, destination, cancellationToken).ConfigureAwait(false);
         return Resolution(destination, ResourceVisualKind.Image, ResourceVisualOrigin.Payload, fingerprint, "Изображение ресурса");
     }
@@ -489,7 +495,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         {
             return null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or COMException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or COMException or InvalidDataException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return null;
         }

@@ -10,5 +10,6 @@
     <Project Path="tests/PersonalResourceWorkspace.Application.Tests/PersonalResourceWorkspace.Application.Tests.csproj" />
     <Project Path="tests/PersonalResourceWorkspace.Domain.Tests/PersonalResourceWorkspace.Domain.Tests.csproj" />
     <Project Path="tests/PersonalResourceWorkspace.Infrastructure.Tests/PersonalResourceWorkspace.Infrastructure.Tests.csproj" />
+    <Project Path="tests/PersonalResourceWorkspace.Windows.Tests/PersonalResourceWorkspace.Windows.Tests.csproj" />
   </Folder>
 </Solution>
