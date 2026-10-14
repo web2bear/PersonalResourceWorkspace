@@ -12,14 +12,13 @@ public sealed partial class MainWindow : Window
     private bool _dropHookScheduled;
 
     public MainWindow(
-        IResourceRepository resourceRepository,
-        ICollectionRepository collectionRepository,
         ResourceLaunchService resourceLaunchService,
         IClipboardService clipboardService,
         IResourceVisualService resourceVisualService,
-        ICollectionViewPreferenceStore viewPreferenceStore,
+        IResourceViewPreferenceStore viewPreferenceStore,
         IUserPreferenceStore userPreferences,
-        IPortableDataDirectory dataDirectory)
+        IPortableDataDirectory dataDirectory,
+        IWorkspaceRepository workspaceRepository)
     {
         InitializeComponent();
 
@@ -28,7 +27,7 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
 
-        _mainPage = new MainPage(this, resourceRepository, collectionRepository, resourceLaunchService, clipboardService, resourceVisualService, viewPreferenceStore, userPreferences, dataDirectory);
+        _mainPage = new MainPage(this, resourceLaunchService, clipboardService, resourceVisualService, viewPreferenceStore, userPreferences, dataDirectory, workspaceRepository);
         RootFrame.Content = _mainPage;
         Activated += MainWindow_Activated;
         Closed += MainWindow_Closed;

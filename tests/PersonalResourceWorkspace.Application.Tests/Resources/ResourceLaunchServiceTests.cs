@@ -116,7 +116,6 @@ public sealed class ResourceLaunchServiceTests
     [InlineData(StoredResourceKinds.Note, ResourceType.TextSnippet)]
     [InlineData(StoredResourceKinds.Image, ResourceType.ImageSnippet)]
     [InlineData(StoredResourceKinds.Command, ResourceType.Command)]
-    [InlineData(StoredResourceKinds.Collection, ResourceType.Collection)]
     public void MapperRoundTripsEveryResourceType(string storedKind, ResourceType expectedType)
     {
         Assert.Equal(expectedType, ResourceTypeMapper.FromStoredKind(storedKind));

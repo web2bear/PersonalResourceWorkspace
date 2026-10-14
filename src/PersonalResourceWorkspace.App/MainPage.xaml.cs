@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using PersonalResourceWorkspace.Application.Abstractions;
-using PersonalResourceWorkspace.Application.Collections;
 using PersonalResourceWorkspace.Application.Models;
 using PersonalResourceWorkspace.Application.Preferences;
 using PersonalResourceWorkspace.Application.Resources;
@@ -24,47 +23,22 @@ namespace PersonalResourceWorkspace.App;
 
 public sealed partial class MainPage : Page
 {
-    private readonly List<WorkspaceResource> _resources =
-    [
-        new("Проект Personal Space", "12 файлов и 3 заметки", "Папка", "Работа", "сегодня", "\uE8B7", Brush(109, 92, 231), true),
-        new("Архитектура приложения.pdf", "PDF · 2,4 МБ", "Файл", "Работа", "вчера", "\uEA90", Brush(226, 90, 90), false),
-        new("Заметки по WinUI.md", "Markdown · 18 КБ", "Файл", "Работа", "2 дня назад", "\uE70F", Brush(88, 157, 234), false),
-        new("UI-референсы", "18 изображений", "Папка", "Дизайн", "сегодня", "\uE8B7", Brush(70, 184, 166), true),
-        new("Палитра и типографика.fig", "Figma · 840 КБ", "Файл", "Дизайн", "3 дня назад", "\uE790", Brush(232, 132, 83), false),
-        new("Наброски продуктов", "7 документов", "Папка", "Идеи", "вчера", "\uE8B7", Brush(225, 178, 62), false),
-        new("Идеи автоматизации.md", "Markdown · 9 КБ", "Файл", "Идеи", "4 дня назад", "\uE70F", Brush(153, 126, 224), true),
-        new("Building a Second Brain.pdf", "PDF · 6,1 МБ", "Файл", "Читать позже", "неделю назад", "\uEA90", Brush(177, 96, 194), false),
-    ];
+    private readonly List<WorkspaceResource> _resources = [];
 
-    private const string AllCollectionTag = "all";
-    private const string FavoritesCollectionTag = "favorites";
-    private const string AddCollectionTag = "add-collection";
-
-    private static readonly string[] CollectionGlyphs =
-    [
-        "\uE8B7", "\uE8A5", "\uE71B", "\uE734", "\uE790", "\uEA80", "\uE8C3", "\uE896",
-        "\uE8F1", "\uE8D6", "\uE714", "\uE715", "\uE8EC", "\uE8A1", "\uE9F9", "\uE90F",
-        "\uE774", "\uE8B0", "\uE946", "\uE8F2", "\uE7F6", "\uE8D4", "\uE716", "\uE8FD",
-    ];
-
-    private static readonly string[] CollectionColors =
-    [
-        "#FF9B72", "#58C7B6", "#F4C95D", "#A995FF", "#7EA7FF",
-        "#E25A5A", "#6D5CE7", "#46B8A6", "#E1B23E", "#B160C2",
-    ];
-
-    private readonly List<WorkspaceGroup> _collections = [];
-    private string _activeCollection = AllCollectionTag;
-    private readonly IResourceRepository _resourceRepository;
-    private readonly ICollectionRepository _collectionRepository;
+    private const string AllSearchTag = "all";
+    private readonly List<TagRecord> _tags = [];
+    private readonly List<SavedSearchRecord> _searches = [];
+    private readonly HashSet<Guid> _temporaryTags = [];
+    private Guid? _activeSearchId;
+    private readonly IWorkspaceRepository _workspaceRepository;
     private readonly ResourceLaunchService _resourceLaunchService;
     private readonly IClipboardService _clipboardService;
     private readonly IResourceVisualService _resourceVisualService;
-    private readonly ICollectionViewPreferenceStore _viewPreferenceStore;
+    private readonly IResourceViewPreferenceStore _viewPreferenceStore;
     private readonly IUserPreferenceStore _userPreferences;
     private readonly IPortableDataDirectory _dataDirectory;
     private readonly Window _window;
-    private CollectionViewMode _viewMode = CollectionViewMode.Grid;
+    private ResourceViewMode _viewMode = ResourceViewMode.Grid;
     private int _cardSize = 1;
     private int _maximumGridColumns = 8;
     private bool _showCardTitle = true;
@@ -80,24 +54,22 @@ public sealed partial class MainPage : Page
 
     public MainPage(
         Window window,
-        IResourceRepository resourceRepository,
-        ICollectionRepository collectionRepository,
         ResourceLaunchService resourceLaunchService,
         IClipboardService clipboardService,
         IResourceVisualService resourceVisualService,
-        ICollectionViewPreferenceStore viewPreferenceStore,
+        IResourceViewPreferenceStore viewPreferenceStore,
         IUserPreferenceStore userPreferences,
-        IPortableDataDirectory dataDirectory)
+        IPortableDataDirectory dataDirectory,
+        IWorkspaceRepository workspaceRepository)
     {
         _window = window;
-        _resourceRepository = resourceRepository;
-        _collectionRepository = collectionRepository;
         _resourceLaunchService = resourceLaunchService;
         _clipboardService = clipboardService;
         _resourceVisualService = resourceVisualService;
         _viewPreferenceStore = viewPreferenceStore;
         _userPreferences = userPreferences;
         _dataDirectory = dataDirectory;
+        _workspaceRepository = workspaceRepository;
         InitializeComponent();
         if (ShellNavigation.SettingsItem is NavigationViewItem settingsItem)
         {
@@ -117,7 +89,7 @@ public sealed partial class MainPage : Page
         await RestoreViewModeAsync();
         await RestoreGridPreferencesAsync();
         await RestoreSortModeAsync();
-        await LoadCollectionsAsync();
+        await LoadWorkspaceNavAsync();
         await LoadResourcesAsync();
         UpdateResponsiveLayout(ActualWidth);
     }
@@ -143,30 +115,24 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        switch (item.Tag)
+        if (item.Tag is SavedSearchRecord search)
         {
-            case AllCollectionTag:
-                _activeCollection = AllCollectionTag;
-                PageTitle.Text = "Все ресурсы";
-                ApplyFilter();
-                break;
-            case FavoritesCollectionTag:
-                _activeCollection = FavoritesCollectionTag;
-                PageTitle.Text = "Избранное";
-                ApplyFilter();
-                break;
-            case AddCollectionTag:
-                _ = AddCollectionAsync();
-                break;
-            case WorkspaceGroup collection:
-                _activeCollection = collection.Name;
-                PageTitle.Text = collection.Name;
-                ApplyFilter();
-                break;
+            _activeSearchId = search.Id;
+            PageTitle.Text = search.Name;
         }
+        else if (Equals(item.Tag, AllSearchTag))
+        {
+            _activeSearchId = null;
+            PageTitle.Text = "Все ресурсы";
+        }
+        else return;
+        _temporaryTags.Clear();
+        SearchBox.Text = string.Empty;
+        TagFilterBox.Text = string.Empty;
+        UpdateTagFilterChips();
+        UpdateCreateAvailability();
+        ApplyFilter();
     }
-
-    private async void AddCollection_Click(object sender, RoutedEventArgs e) => await AddCollectionAsync();
 
     private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
@@ -180,11 +146,16 @@ public sealed partial class MainPage : Page
     {
         try
         {
-            var collection = GetDefaultCollection();
+            if (ActiveRequiredTags().Concat(_temporaryTags).Contains(SystemTags.TrashId))
+            {
+                await ShowMessageAsync("Создание недоступно", "В поиске с условием «Корзина» нельзя создать ресурс.");
+                return;
+            }
             var draft = await TryReadClipboardDraftAsync();
             var resource = draft is null
-                ? CreateEmptyResource(collection)
-                : ToWorkspaceResource(draft, collection);
+                ? CreateEmptyResource()
+                : ToWorkspaceResource(draft);
+            resource.TagIds.UnionWith(NewResourceTags());
 
             if (await ShowResourceEditorAsync(resource, isNew: true))
             {
@@ -316,14 +287,14 @@ public sealed partial class MainPage : Page
     }
 
     private WorkspaceResource? GetVisibleSelectedResource() =>
-        (_viewMode == CollectionViewMode.Grid ? ResourcesGrid.SelectedItem : ResourcesList.SelectedItem)
+        (_viewMode == ResourceViewMode.Grid ? ResourcesGrid.SelectedItem : ResourcesList.SelectedItem)
         as WorkspaceResource;
 
     private async void GridViewToggle_Click(object sender, RoutedEventArgs e) =>
-        await SetViewModeAsync(CollectionViewMode.Grid, persist: true);
+        await SetViewModeAsync(ResourceViewMode.Grid, persist: true);
 
     private async void ListViewToggle_Click(object sender, RoutedEventArgs e) =>
-        await SetViewModeAsync(CollectionViewMode.List, persist: true);
+        await SetViewModeAsync(ResourceViewMode.List, persist: true);
 
     private async Task RestoreViewModeAsync()
     {
@@ -333,18 +304,18 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
-            await SetViewModeAsync(CollectionViewMode.Grid, persist: false);
+            await SetViewModeAsync(ResourceViewMode.Grid, persist: false);
             StatusText.Text = $"Не удалось восстановить вид: {exception.Message}";
         }
     }
 
-    private async Task SetViewModeAsync(CollectionViewMode mode, bool persist)
+    private async Task SetViewModeAsync(ResourceViewMode mode, bool persist)
     {
         _viewMode = mode;
-        GridViewToggle.IsChecked = mode == CollectionViewMode.Grid;
-        ListViewToggle.IsChecked = mode == CollectionViewMode.List;
-        ResourcesGrid.Visibility = mode == CollectionViewMode.Grid ? Visibility.Visible : Visibility.Collapsed;
-        ResourcesList.Visibility = mode == CollectionViewMode.List ? Visibility.Visible : Visibility.Collapsed;
+        GridViewToggle.IsChecked = mode == ResourceViewMode.Grid;
+        ListViewToggle.IsChecked = mode == ResourceViewMode.List;
+        ResourcesGrid.Visibility = mode == ResourceViewMode.Grid ? Visibility.Visible : Visibility.Collapsed;
+        ResourcesList.Visibility = mode == ResourceViewMode.List ? Visibility.Visible : Visibility.Collapsed;
 
         _synchronizingSelection = true;
         ResourcesGrid.SelectedItem = _selectedResource;
@@ -416,7 +387,7 @@ public sealed partial class MainPage : Page
         };
         var viewBox = new ComboBox { Header = "Вид ресурсов" };
         viewBox.Items.Add("Сетка"); viewBox.Items.Add("Список");
-        viewBox.SelectedIndex = _viewMode == CollectionViewMode.List ? 1 : 0;
+        viewBox.SelectedIndex = _viewMode == ResourceViewMode.List ? 1 : 0;
         var sortBox = new ComboBox { Header = "Сортировка" };
         sortBox.Items.Add("По названию"); sortBox.Items.Add("По дате изменения");
         sortBox.SelectedIndex = _sortMode == ResourceSortMode.Modified ? 1 : 0;
@@ -447,7 +418,7 @@ public sealed partial class MainPage : Page
         {
             var requestedRoot = Path.GetFullPath(Path.IsPathFullyQualified(pathBox.Text) ? pathBox.Text : Path.Combine(AppContext.BaseDirectory, pathBox.Text));
             var changedRoot = !string.Equals(requestedRoot, _dataDirectory.GetLocalDataRoot(), StringComparison.OrdinalIgnoreCase);
-            await SetViewModeAsync(viewBox.SelectedIndex == 1 ? CollectionViewMode.List : CollectionViewMode.Grid, persist: true);
+            await SetViewModeAsync(viewBox.SelectedIndex == 1 ? ResourceViewMode.List : ResourceViewMode.Grid, persist: true);
             _sortMode = sortBox.SelectedIndex == 1 ? ResourceSortMode.Modified : ResourceSortMode.Title;
             SortByTitleItem.IsChecked = _sortMode == ResourceSortMode.Title;
             SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
@@ -513,6 +484,14 @@ public sealed partial class MainPage : Page
 
     private void WorkArea_DragOver(object sender, DragEventArgs e)
     {
+        if (e.DataView.Properties.ContainsKey("ResourceId") || e.DataView.Properties.ContainsKey("SearchId")) return;
+        if (NewResourceTags().Contains(SystemTags.TrashId))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            DropOverlay.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+            return;
+        }
         e.AcceptedOperation = DataPackageOperation.Copy;
         e.DragUIOverride.Caption = "Добавить в Personal Space";
         e.DragUIOverride.IsCaptionVisible = true;
@@ -523,6 +502,7 @@ public sealed partial class MainPage : Page
 
     private void WorkArea_DragLeave(object sender, DragEventArgs e)
     {
+        if (e.DataView.Properties.ContainsKey("ResourceId") || e.DataView.Properties.ContainsKey("SearchId")) return;
         var position = e.GetPosition(WorkArea);
         if (position.X < 0 ||
             position.Y < 0 ||
@@ -537,6 +517,14 @@ public sealed partial class MainPage : Page
 
     private async void WorkArea_Drop(object sender, DragEventArgs e)
     {
+        if (e.DataView.Properties.ContainsKey("ResourceId") || e.DataView.Properties.ContainsKey("SearchId")) return;
+        if (NewResourceTags().Contains(SystemTags.TrashId))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
+            StatusText.Text = "В поиске с условием «Корзина» нельзя создать ресурс";
+            return;
+        }
         e.AcceptedOperation = DataPackageOperation.Copy;
         e.Handled = true;
         DropOverlay.Visibility = Visibility.Collapsed;
@@ -565,13 +553,12 @@ public sealed partial class MainPage : Page
 
     private async Task AddDroppedPathsAsync(IReadOnlyList<string> paths)
     {
-        var collection = GetDefaultCollection();
         var added = new List<WorkspaceResource>();
         foreach (var path in paths)
         {
             if (!string.IsNullOrWhiteSpace(path))
             {
-                added.Add(ToWorkspaceResource(ResourceDraftFactory.FromPath(path), collection));
+                added.Add(ToWorkspaceResource(ResourceDraftFactory.FromPath(path)));
             }
         }
 
@@ -582,8 +569,7 @@ public sealed partial class MainPage : Page
     {
         try
         {
-            var collection = GetDefaultCollection();
-            return await AddResourcesAsync(await CollectDroppedResourcesAsync(dataView, collection));
+            return await AddResourcesAsync(await CollectDroppedResourcesAsync(dataView));
         }
         catch (Exception exception)
         {
@@ -594,6 +580,11 @@ public sealed partial class MainPage : Page
 
     private async Task<bool> AddResourcesAsync(List<WorkspaceResource> added)
     {
+        if (NewResourceTags().Contains(SystemTags.TrashId))
+        {
+            StatusText.Text = "В поиске с условием «Корзина» нельзя создать ресурс";
+            return false;
+        }
         if (IsDuplicateDrop(added))
         {
             return true;
@@ -601,6 +592,7 @@ public sealed partial class MainPage : Page
 
         foreach (var resource in added)
         {
+            resource.TagIds.UnionWith(NewResourceTags());
             _resources.Insert(0, resource);
         }
 
@@ -642,8 +634,7 @@ public sealed partial class MainPage : Page
     }
 
     private static async Task<List<WorkspaceResource>> CollectDroppedResourcesAsync(
-        DataPackageView dataView,
-        string collection)
+        DataPackageView dataView)
     {
         var added = new List<WorkspaceResource>();
 
@@ -652,7 +643,7 @@ public sealed partial class MainPage : Page
             var items = await dataView.GetStorageItemsAsync();
             foreach (var item in items)
             {
-                added.Add(CreateResourceFromStorageItem(item, collection));
+                added.Add(CreateResourceFromStorageItem(item));
             }
 
             if (added.Count > 0)
@@ -667,13 +658,13 @@ public sealed partial class MainPage : Page
 
         if (dataView.Contains(StandardDataFormats.Uri))
         {
-            added.Add(ToWorkspaceResource(ResourceDraftFactory.FromUri(await dataView.GetUriAsync()), collection));
+            added.Add(ToWorkspaceResource(ResourceDraftFactory.FromUri(await dataView.GetUriAsync())));
             return added;
         }
 
         if (dataView.Contains(StandardDataFormats.WebLink))
         {
-            added.Add(ToWorkspaceResource(ResourceDraftFactory.FromUri(await dataView.GetWebLinkAsync()), collection));
+            added.Add(ToWorkspaceResource(ResourceDraftFactory.FromUri(await dataView.GetWebLinkAsync())));
             return added;
         }
 
@@ -682,7 +673,7 @@ public sealed partial class MainPage : Page
             var text = (await dataView.GetTextAsync()).Trim();
             if (ResourceDraftFactory.TryParseText(text) is { } draft)
             {
-                added.Add(ToWorkspaceResource(draft, collection));
+                added.Add(ToWorkspaceResource(draft));
             }
         }
 
@@ -732,22 +723,50 @@ public sealed partial class MainPage : Page
             TextWrapping = TextWrapping.Wrap,
             Visibility = Visibility.Collapsed,
         };
-        var collectionNames = _collections
-            .Where(collection => !collection.IsTrash || collection.Name == resource.Collection)
-            .Select(collection => collection.Name)
-            .ToArray();
-        var collectionBox = new ComboBox
+        var workingTags = resource.TagIds.ToHashSet();
+        var tagInput = new AutoSuggestBox { PlaceholderText = "Введите имя тэга и нажмите Enter", Width = 330 };
+        var tagChips = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        void RenderEditorTags()
         {
-            Header = "Коллекция",
-            ItemsSource = collectionNames.Length > 0 ? collectionNames : new[] { GetDefaultCollection() },
-            SelectedItem = collectionNames.Contains(resource.Collection) ? resource.Collection : GetDefaultCollection(),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        var favoriteBox = new CheckBox
+            tagChips.Children.Clear();
+            foreach (var id in workingTags)
+            {
+                var chip = new Button { Content = $"{TagName(id)} {(id == SystemTags.TrashId ? "" : "×")}" };
+                chip.IsEnabled = id != SystemTags.TrashId;
+                chip.Click += (_, _) =>
+                {
+                    workingTags.Remove(id);
+                    if (id != SystemTags.InboxId && !workingTags.Contains(SystemTags.TrashId) &&
+                        workingTags.All(tagId => tagId == SystemTags.InboxId)) workingTags.Add(SystemTags.InboxId);
+                    RenderEditorTags();
+                };
+                tagChips.Children.Add(chip);
+            }
+        }
+        tagInput.TextChanged += (sender, args) =>
         {
-            Content = "Добавить в избранное",
-            IsChecked = resource.IsFavorite,
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+                sender.ItemsSource = _tags.Where(tag => tag.Id != SystemTags.TrashId &&
+                    tag.Name.Contains(sender.Text.Trim(), StringComparison.CurrentCultureIgnoreCase))
+                    .Select(tag => tag.Name).ToArray();
         };
+        tagInput.QuerySubmitted += async (sender, args) =>
+        {
+            try
+            {
+                var name = (args.ChosenSuggestion as string ?? args.QueryText).Trim();
+                if (name.Length == 0) return;
+                var tag = await GetOrCreateTagAsync(name);
+                if (tag.Id == SystemTags.TrashId) return;
+                if (tag.Id != SystemTags.InboxId && workingTags.All(id => id == SystemTags.InboxId))
+                    workingTags.Remove(SystemTags.InboxId);
+                workingTags.Add(tag.Id);
+                sender.Text = string.Empty;
+                RenderEditorTags();
+            }
+            catch (Exception exception) { validationText.Text = exception.Message; validationText.Visibility = Visibility.Visible; }
+        };
+        RenderEditorTags();
 
         var autoVisualOption = new ComboBoxItem { Content = "Автоматически", Tag = ResourceVisualMode.Auto };
         var userVisualOption = new ComboBoxItem { Content = "Своё изображение или иконка", Tag = ResourceVisualMode.UserAsset };
@@ -988,6 +1007,9 @@ public sealed partial class MainPage : Page
         var fields = new StackPanel { Spacing = 14, MinWidth = 420 };
         fields.Children.Add(titleBox);
         fields.Children.Add(descriptionBox);
+        fields.Children.Add(new TextBlock { Text = "Тэги" });
+        fields.Children.Add(tagChips);
+        fields.Children.Add(tagInput);
         fields.Children.Add(kindBox);
         fields.Children.Add(addressBox);
         fields.Children.Add(addressHint);
@@ -996,14 +1018,19 @@ public sealed partial class MainPage : Page
         fields.Children.Add(visualStatus);
         fields.Children.Add(visualButtons);
         fields.Children.Add(validationText);
-        fields.Children.Add(collectionBox);
-        fields.Children.Add(favoriteBox);
+
+        var scrollableFields = new ScrollViewer
+        {
+            Content = fields,
+            MaxHeight = 520,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
 
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = isNew ? "Добавить ресурс" : "Редактировать ресурс",
-            Content = fields,
+            Content = scrollableFields,
             PrimaryButtonText = isNew ? "Добавить" : "Сохранить",
             SecondaryButtonText = "Открыть",
             IsSecondaryButtonEnabled = true,
@@ -1111,8 +1138,7 @@ public sealed partial class MainPage : Page
         resource.Description = descriptionBox.Text.Trim();
         resource.Kind = ResourceTypeMapper.NormalizeStoredKind(kindBox.SelectedItem as string);
         resource.Address = addressBox.Text.Trim();
-        resource.Collection = collectionBox.SelectedItem as string ?? GetDefaultCollection();
-        resource.IsFavorite = favoriteBox.IsChecked == true;
+        resource.TagIds = workingTags;
         resource.Glyph = ResourceTypeMapper.GlyphForStoredKind(resource.Kind);
         resource.AccentBrush = AccentFor(resource.Kind);
         resource.Visual = committedVisual;
@@ -1121,40 +1147,22 @@ public sealed partial class MainPage : Page
         return true;
     }
 
-    private async Task LoadCollectionsAsync()
-    {
-        try
-        {
-            var saved = await _collectionRepository.GetAllAsync(CancellationToken.None);
-            _collections.Clear();
-            _collections.AddRange(saved.Select(WorkspaceGroup.FromRecord));
-            RebuildCollectionNavItems();
-            SelectActiveNavItem();
-        }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Не удалось загрузить коллекции: {exception.Message}";
-        }
-    }
-
     private async Task LoadResourcesAsync()
     {
         try
         {
-            var saved = await _resourceRepository.GetAllAsync(CancellationToken.None);
+            var saved = await _workspaceRepository.GetResourcesAsync(CancellationToken.None);
             _resources.Clear();
             _resources.AddRange(saved.Select(resource => new WorkspaceResource(
                 resource.Title,
                 resource.Description,
                 ResourceTypeMapper.NormalizeStoredKind(resource.Kind),
-                resource.Collection,
                 resource.Modified,
                 ResourceTypeMapper.GlyphForStoredKind(resource.Kind),
                 AccentFor(resource.Kind),
-                resource.IsFavorite,
                 resource.Address,
                 resource.Visual)
-            { Id = resource.Id }));
+            { Id = resource.Id, TagIds = resource.TagIds.ToHashSet() }));
             ApplyFilter();
             await ResolveVisualsAsync(_resources, forceRefresh: false);
         }
@@ -1165,18 +1173,17 @@ public sealed partial class MainPage : Page
     }
 
     private async Task SaveResourceAsync(WorkspaceResource resource) =>
-        await _resourceRepository.SaveAsync(
-            new ResourceRecord(
+        await _workspaceRepository.SaveResourceAsync(
+            new TaggedResourceRecord(
                 resource.Id,
                 resource.Title,
                 resource.Description,
                 resource.Kind,
-                resource.Collection,
                 resource.Modified,
                 resource.Glyph,
-                resource.IsFavorite,
                 resource.Address,
-                resource.Visual),
+                resource.Visual,
+                resource.TagIds.ToArray()),
             CancellationToken.None);
 
     private async Task SaveResourcesAsync()
@@ -1266,66 +1273,46 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private string GetDefaultCollection()
-    {
-        if (_collections.FirstOrDefault(collection => collection.Name == _activeCollection) is { IsTrash: false } active)
-        {
-            return active.Name;
-        }
+    private bool IsInTrash(WorkspaceResource resource) => resource.TagIds.Contains(SystemTags.TrashId);
 
-        return _collections.FirstOrDefault(collection => collection.IsDefault)?.Name
-            ?? _collections.FirstOrDefault(collection => !collection.IsTrash)?.Name
-            ?? "Входящие";
-    }
-
-    private WorkspaceGroup? GetTrashCollection() =>
-        _collections.FirstOrDefault(collection => collection.IsTrash);
-
-    private bool IsInTrash(WorkspaceResource resource) =>
-        GetTrashCollection() is { } trash &&
-        string.Equals(resource.Collection, trash.Name, StringComparison.OrdinalIgnoreCase);
-
-    private static WorkspaceResource CreateEmptyResource(string collection) =>
+    private static WorkspaceResource CreateEmptyResource() =>
         ToWorkspaceResource(
             new ResourceDraft(
                 string.Empty,
                 string.Empty,
                 StoredResourceKinds.File,
-                string.Empty),
-            collection);
+                string.Empty));
 
-    private static WorkspaceResource ToWorkspaceResource(ResourceDraft draft, string collection) =>
+    private static WorkspaceResource ToWorkspaceResource(ResourceDraft draft) =>
         new(
             draft.Title,
             draft.Description,
             draft.Kind,
-            collection,
             "только что",
             ResourceTypeMapper.GlyphForStoredKind(draft.Kind),
             AccentFor(draft.Kind),
-            false,
             draft.Address);
 
-    private static WorkspaceResource CreateResourceFromStorageItem(IStorageItem item, string collection)
+    private static WorkspaceResource CreateResourceFromStorageItem(IStorageItem item)
     {
         if (!string.IsNullOrWhiteSpace(item.Path))
         {
-            return ToWorkspaceResource(ResourceDraftFactory.FromPath(item.Path), collection);
+            return ToWorkspaceResource(ResourceDraftFactory.FromPath(item.Path));
         }
 
         var kind = item is StorageFolder ? StoredResourceKinds.Folder : StoredResourceKinds.File;
         return ToWorkspaceResource(
-            new ResourceDraft(item.Name, string.Empty, kind, item.Path),
-            collection);
+            new ResourceDraft(item.Name, string.Empty, kind, item.Path));
     }
 
     private void ApplyFilter()
     {
+        foreach (var resource in _resources)
+            resource.TagsDisplay = string.Join(", ", resource.TagIds.Where(id => id != SystemTags.TrashId).Select(TagName));
         var query = SearchBox?.Text?.Trim() ?? string.Empty;
+        var requiredTagIds = ActiveRequiredTags();
         IEnumerable<WorkspaceResource> matches = _resources.Where(resource =>
-            ((_activeCollection == AllCollectionTag && !IsInTrash(resource)) ||
-             (_activeCollection == FavoritesCollectionTag && resource.IsFavorite && !IsInTrash(resource)) ||
-             resource.Collection == _activeCollection) &&
+            SystemTags.Matches(resource.TagIds, requiredTagIds, _temporaryTags) &&
             (query.Length == 0 ||
              resource.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
              resource.Description.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
@@ -1363,7 +1350,7 @@ public sealed partial class MainPage : Page
             _selectedResource = null;
         }
 
-        UpdateCollectionCounts();
+        UpdateSearchCounts();
         UpdateResourcePresentation(ActualWidth);
     }
 
@@ -1374,101 +1361,26 @@ public sealed partial class MainPage : Page
         _ => $"{count} ресурсов",
     };
 
-    private void UpdateCollectionCounts()
+    private void UpdateSearchCounts()
     {
-        AllResourcesCount.Text = _resources.Count(resource => !IsInTrash(resource)).ToString(CultureInfo.CurrentCulture);
-        FavoritesCount.Text = _resources.Count(resource => resource.IsFavorite && !IsInTrash(resource)).ToString(CultureInfo.CurrentCulture);
-        foreach (var item in ShellNavigation.MenuItems.OfType<NavigationViewItem>())
+        AllResourcesCount.Text = _resources.Count(resource => !resource.TagIds.Contains(SystemTags.TrashId)).ToString(CultureInfo.CurrentCulture);
+        foreach (var search in _searches)
         {
-            if (item.Tag is WorkspaceGroup collection)
-            {
-                var count = _resources.Count(resource => resource.Collection == collection.Name);
-                item.Content = CreateNavigationContent(collection.Name, count);
-            }
+            if (_searchNavItems.TryGetValue(search.Id, out var item))
+                item.Content = CreateSearchDropContent(search.Name,
+                    _resources.Count(resource => SystemTags.Matches(resource.TagIds, search.RequiredTagIds, [])));
         }
     }
 
     private void UpdateResourcePresentation(double width)
     {
-        var showCollectionContext = _activeCollection is AllCollectionTag or FavoritesCollectionTag ||
-            !string.IsNullOrWhiteSpace(SearchBox?.Text);
         foreach (var resource in _resources)
         {
             resource.UpdatePresentation(
-                showCollectionContext,
                 showSourceColumn: width >= 660,
-                showCollectionColumn: showCollectionContext && width >= 850,
+                showTagsColumn: width >= 850,
                 showDateColumn: width >= 1020);
             resource.UpdateCardPresentation(_cardSize, _showCardTitle, _showCardDescription, _showCardDeleteButton);
-        }
-    }
-
-    private async Task AddCollectionAsync()
-    {
-        try
-        {
-            var collection = new WorkspaceGroup
-            {
-                Id = Guid.NewGuid(),
-                Name = string.Empty,
-                Glyph = "\uE8B7",
-                Color = "#7EA7FF",
-                SortOrder = _collections.Count == 0 ? 0 : _collections.Max(item => item.SortOrder) + 1,
-                IsDefault = _collections.Count == 0,
-                IsTrash = false,
-            };
-
-            if (!await ShowCollectionDialogAsync(collection, "Новая коллекция", "Создать", editName: true, editIcon: true))
-            {
-                SelectActiveNavItem();
-                return;
-            }
-
-            await _collectionRepository.SaveAsync(collection.ToRecord(), CancellationToken.None);
-            _collections.Add(collection);
-            _activeCollection = collection.Name;
-            PageTitle.Text = collection.Name;
-            RebuildCollectionNavItems();
-            ApplyFilter();
-            SelectActiveNavItem();
-            StatusText.Text = $"Создана коллекция: {collection.Name}";
-        }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Не удалось создать коллекцию: {exception.Message}";
-            SelectActiveNavItem();
-        }
-    }
-
-    private async void RenameCollectionMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { Tag: WorkspaceGroup collection })
-        {
-            await UpdateCollectionAsync(collection, "Переименовать коллекцию", "Сохранить", editName: true, editIcon: false);
-        }
-    }
-
-    private async void ChangeCollectionIconMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { Tag: WorkspaceGroup collection })
-        {
-            await UpdateCollectionAsync(collection, "Иконка коллекции", "Сохранить", editName: false, editIcon: true);
-        }
-    }
-
-    private async void DeleteCollectionMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { Tag: WorkspaceGroup collection })
-        {
-            await DeleteCollectionAsync(collection);
-        }
-    }
-
-    private async void EmptyTrashMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { Tag: WorkspaceGroup collection } && collection.IsTrash)
-        {
-            await EmptyTrashAsync(collection);
         }
     }
 
@@ -1476,13 +1388,6 @@ public sealed partial class MainPage : Page
     {
         try
         {
-            var trash = GetTrashCollection();
-            if (trash is null)
-            {
-                await ShowMessageAsync("Корзина недоступна", "Системная коллекция «Корзина» не найдена.");
-                return;
-            }
-
             var isAlreadyInTrash = IsInTrash(resource);
             var confirmation = new ContentDialog
             {
@@ -1490,7 +1395,7 @@ public sealed partial class MainPage : Page
                 Title = isAlreadyInTrash ? "Удалить ресурс безвозвратно?" : "Удалить ресурс?",
                 Content = isAlreadyInTrash
                     ? $"Ресурс «{resource.Title}» будет удалён полностью и его нельзя будет восстановить."
-                    : $"Ресурс «{resource.Title}» будет перемещён в «{trash.Name}».",
+                    : $"Ресурс «{resource.Title}» будет перемещён в «Корзину». Остальные тэги сохранятся.",
                 PrimaryButtonText = isAlreadyInTrash ? "Удалить безвозвратно" : "Удалить",
                 CloseButtonText = "Отмена",
                 DefaultButton = ContentDialogButton.Close,
@@ -1503,14 +1408,14 @@ public sealed partial class MainPage : Page
 
             if (isAlreadyInTrash)
             {
-                await _resourceRepository.DeleteAsync(resource.Id, CancellationToken.None);
+                await _workspaceRepository.DeleteResourceAsync(resource.Id, CancellationToken.None);
                 _resources.Remove(resource);
                 ApplyFilter();
                 StatusText.Text = $"Удалено безвозвратно: {resource.Title}";
                 return;
             }
 
-            resource.Collection = trash.Name;
+            resource.TagIds.Add(SystemTags.TrashId);
             await SaveResourceAsync(resource);
             ApplyFilter();
             StatusText.Text = $"Перемещено в корзину: {resource.Title}";
@@ -1519,422 +1424,6 @@ public sealed partial class MainPage : Page
         {
             StatusText.Text = $"Не удалось удалить ресурс: {exception.Message}";
         }
-    }
-
-    private async Task EmptyTrashAsync(WorkspaceGroup trash)
-    {
-        try
-        {
-            var trashed = _resources
-                .Where(resource => string.Equals(resource.Collection, trash.Name, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            if (trashed.Count == 0)
-            {
-                await ShowMessageAsync("Корзина пуста", "В корзине нет ресурсов.");
-                return;
-            }
-
-            var confirmation = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "Очистить корзину?",
-                Content = $"Все ресурсы в корзине ({trashed.Count}) будут удалены полностью и их нельзя будет восстановить.",
-                PrimaryButtonText = "Очистить",
-                CloseButtonText = "Отмена",
-                DefaultButton = ContentDialogButton.Close,
-            };
-
-            if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-
-            await _resourceRepository.DeleteByCollectionAsync(trash.Name, CancellationToken.None);
-            foreach (var resource in trashed)
-            {
-                _resources.Remove(resource);
-            }
-
-            ApplyFilter();
-            StatusText.Text = "Корзина очищена";
-        }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Не удалось очистить корзину: {exception.Message}";
-        }
-    }
-
-    private async Task UpdateCollectionAsync(
-        WorkspaceGroup collection,
-        string title,
-        string primaryButtonText,
-        bool editName,
-        bool editIcon)
-    {
-        try
-        {
-            var previousName = collection.Name;
-            if (!await ShowCollectionDialogAsync(collection, title, primaryButtonText, editName, editIcon))
-            {
-                return;
-            }
-
-            await _collectionRepository.SaveAsync(collection.ToRecord(), CancellationToken.None);
-            if (!string.Equals(previousName, collection.Name, StringComparison.Ordinal))
-            {
-                foreach (var resource in _resources.Where(resource => resource.Collection == previousName))
-                {
-                    resource.Collection = collection.Name;
-                }
-
-                if (_activeCollection == previousName)
-                {
-                    _activeCollection = collection.Name;
-                    PageTitle.Text = collection.Name;
-                }
-            }
-
-            RebuildCollectionNavItems();
-            ApplyFilter();
-            SelectActiveNavItem();
-            StatusText.Text = $"Сохранена коллекция: {collection.Name}";
-        }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Не удалось сохранить коллекцию: {exception.Message}";
-        }
-    }
-
-    private async Task DeleteCollectionAsync(WorkspaceGroup collection)
-    {
-        try
-        {
-            if (collection.IsDefault)
-            {
-                await ShowMessageAsync("Нельзя удалить", "Коллекцию по умолчанию удалить нельзя.");
-                return;
-            }
-
-            if (collection.IsTrash)
-            {
-                await ShowMessageAsync("Нельзя удалить", "Корзину удалить нельзя.");
-                return;
-            }
-
-            var fallback = _collections.FirstOrDefault(item => item.IsDefault && !item.IsTrash && item.Id != collection.Id)
-                ?? _collections.FirstOrDefault(item => !item.IsTrash && item.Id != collection.Id);
-            if (fallback is null)
-            {
-                await ShowMessageAsync("Нельзя удалить", "Должна остаться хотя бы одна коллекция.");
-                return;
-            }
-
-            var resourceCount = _resources.Count(resource => resource.Collection == collection.Name);
-            var confirmation = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "Удалить коллекцию?",
-                Content = resourceCount == 0
-                    ? $"Коллекция «{collection.Name}» будет удалена."
-                    : $"Коллекция «{collection.Name}» будет удалена. Ресурсы ({resourceCount}) перейдут в «{fallback.Name}».",
-                PrimaryButtonText = "Удалить",
-                CloseButtonText = "Отмена",
-                DefaultButton = ContentDialogButton.Close,
-            };
-
-            if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-
-            await _collectionRepository.DeleteAsync(collection.Id, fallback.Id, CancellationToken.None);
-            foreach (var resource in _resources.Where(resource => resource.Collection == collection.Name))
-            {
-                resource.Collection = fallback.Name;
-            }
-
-            _collections.Remove(collection);
-            if (_activeCollection == collection.Name)
-            {
-                _activeCollection = fallback.Name;
-                PageTitle.Text = fallback.Name;
-            }
-
-            RebuildCollectionNavItems();
-            ApplyFilter();
-            SelectActiveNavItem();
-            StatusText.Text = $"Удалена коллекция: {collection.Name}";
-        }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Не удалось удалить коллекцию: {exception.Message}";
-        }
-    }
-
-    private async Task<bool> ShowCollectionDialogAsync(
-        WorkspaceGroup collection,
-        string title,
-        string primaryButtonText,
-        bool editName,
-        bool editIcon)
-    {
-        var nameBox = new TextBox
-        {
-            Header = "Название",
-            Text = collection.Name,
-            PlaceholderText = "Например, Проекты",
-            Visibility = editName ? Visibility.Visible : Visibility.Collapsed,
-        };
-        var selectedGlyph = collection.Glyph;
-        var selectedColor = collection.Color;
-        var previewGlyph = new FontIcon
-        {
-            Glyph = selectedGlyph,
-            FontSize = 24,
-            Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255)),
-        };
-        var previewImage = new Image
-        {
-            Stretch = Stretch.UniformToFill,
-            Visibility = string.IsNullOrWhiteSpace(collection.VisualAssetPath) ? Visibility.Collapsed : Visibility.Visible,
-        };
-        var existingCollectionVisualPath = _resourceVisualService.GetAbsoluteAssetPath(collection.VisualAssetPath);
-        if (existingCollectionVisualPath is not null && File.Exists(existingCollectionVisualPath))
-        {
-            try
-            {
-                previewImage.Source = await LoadImageSourceAsync(existingCollectionVisualPath, CancellationToken.None);
-                previewGlyph.Visibility = Visibility.Collapsed;
-            }
-            catch (Exception)
-            {
-                previewImage.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        var preview = new Border
-        {
-            Width = 52,
-            Height = 52,
-            CornerRadius = new CornerRadius(12),
-            Background = BrushFromHex(selectedColor),
-            Child = new Grid { Children = { previewGlyph, previewImage } },
-        };
-        string? pendingCollectionVisualPath = null;
-        var resetCollectionVisual = false;
-
-        var accentBrush = (Brush)Microsoft.UI.Xaml.Application.Current.Resources["AccentFillColorDefaultBrush"];
-        var transparentBrush = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-        const int glyphColumns = 8;
-        var glyphPanel = new Grid();
-        AutomationProperties.SetName(glyphPanel, "Иконка коллекции");
-        for (var column = 0; column < glyphColumns; column++)
-        {
-            glyphPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        }
-
-        Button? activeGlyphButton = null;
-        for (var index = 0; index < CollectionGlyphs.Length; index++)
-        {
-            if (index % glyphColumns == 0)
-            {
-                glyphPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            }
-
-            var glyph = CollectionGlyphs[index];
-            var button = new Button
-            {
-                Tag = glyph,
-                Width = 44,
-                Height = 44,
-                Padding = new Thickness(0),
-                Margin = new Thickness(2),
-                Content = new FontIcon { Glyph = glyph, FontSize = 18 },
-                BorderThickness = new Thickness(2),
-                BorderBrush = glyph == selectedGlyph ? accentBrush : transparentBrush,
-                Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
-            };
-            AutomationProperties.SetName(button, "Выбрать иконку");
-            if (glyph == selectedGlyph)
-            {
-                activeGlyphButton = button;
-            }
-
-            button.Click += (_, _) =>
-            {
-                selectedGlyph = glyph;
-                previewGlyph.Glyph = glyph;
-                previewGlyph.Visibility = Visibility.Visible;
-                previewImage.Visibility = Visibility.Collapsed;
-                pendingCollectionVisualPath = null;
-                resetCollectionVisual = true;
-                if (activeGlyphButton is not null)
-                {
-                    activeGlyphButton.BorderBrush = transparentBrush;
-                }
-
-                activeGlyphButton = button;
-                button.BorderBrush = accentBrush;
-            };
-
-            Grid.SetRow(button, index / glyphColumns);
-            Grid.SetColumn(button, index % glyphColumns);
-            glyphPanel.Children.Add(button);
-        }
-
-        var colorPanel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        foreach (var color in CollectionColors)
-        {
-            var swatch = new Button
-            {
-                Tag = color,
-                Width = 28,
-                Height = 28,
-                Padding = new Thickness(0),
-                Background = BrushFromHex(color),
-                BorderBrush = color == selectedColor
-                    ? (Brush)Microsoft.UI.Xaml.Application.Current.Resources["AccentFillColorDefaultBrush"]
-                    : new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
-                BorderThickness = new Thickness(2),
-                CornerRadius = new CornerRadius(14),
-            };
-            swatch.Click += (_, _) =>
-            {
-                selectedColor = color;
-                preview.Background = BrushFromHex(color);
-                foreach (var child in colorPanel.Children.OfType<Button>())
-                {
-                    child.BorderBrush = child.Tag as string == selectedColor
-                        ? (Brush)Microsoft.UI.Xaml.Application.Current.Resources["AccentFillColorDefaultBrush"]
-                        : new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-                }
-            };
-            colorPanel.Children.Add(swatch);
-        }
-
-        var fields = new StackPanel { Spacing = 14, MinWidth = 420 };
-        if (editName)
-        {
-            fields.Children.Add(nameBox);
-        }
-
-        if (editIcon)
-        {
-            fields.Children.Add(new TextBlock { Text = "Визуал коллекции", Opacity = 0.75 });
-            fields.Children.Add(preview);
-            var visualActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            var chooseImageButton = new Button { Content = "Выбрать изображение…" };
-            var useGlyphButton = new Button { Content = "Использовать значок" };
-            chooseImageButton.Click += async (_, _) =>
-            {
-                var picker = new FileOpenPicker
-                {
-                    SuggestedStartLocation = PickerLocationId.PicturesLibrary,
-                    ViewMode = PickerViewMode.Thumbnail,
-                };
-                foreach (var extension in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".ico", ".tif", ".tiff" })
-                {
-                    picker.FileTypeFilter.Add(extension);
-                }
-
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(_window));
-                var file = await picker.PickSingleFileAsync();
-                if (file is not null)
-                {
-                    try
-                    {
-                        previewImage.Source = await LoadImageSourceAsync(file.Path, CancellationToken.None);
-                        previewImage.Visibility = Visibility.Visible;
-                        previewGlyph.Visibility = Visibility.Collapsed;
-                        pendingCollectionVisualPath = file.Path;
-                        resetCollectionVisual = false;
-                    }
-                    catch (Exception exception)
-                    {
-                        await ShowMessageAsync("Не удалось показать изображение", exception.Message);
-                    }
-                }
-            };
-            useGlyphButton.Click += (_, _) =>
-            {
-                previewImage.Source = null;
-                previewImage.Visibility = Visibility.Collapsed;
-                previewGlyph.Visibility = Visibility.Visible;
-                pendingCollectionVisualPath = null;
-                resetCollectionVisual = true;
-            };
-            visualActions.Children.Add(chooseImageButton);
-            visualActions.Children.Add(useGlyphButton);
-            fields.Children.Add(visualActions);
-            fields.Children.Add(new TextBlock { Text = "Значок типа", Opacity = 0.75 });
-            fields.Children.Add(glyphPanel);
-            fields.Children.Add(new TextBlock { Text = "Цвет", Opacity = 0.75 });
-            fields.Children.Add(colorPanel);
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = title,
-            Content = fields,
-            PrimaryButtonText = primaryButtonText,
-            CloseButtonText = "Отмена",
-            DefaultButton = ContentDialogButton.Primary,
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return false;
-        }
-
-        var name = editName ? nameBox.Text.Trim() : collection.Name;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            await ShowMessageAsync("Нужно название", "Введите название коллекции.");
-            return false;
-        }
-
-        if (!collection.IsTrash &&
-            string.Equals(name, SystemCollections.TrashName, StringComparison.OrdinalIgnoreCase))
-        {
-            await ShowMessageAsync("Имя занято", "Название «Корзина» зарезервировано.");
-            return false;
-        }
-
-        if (_collections.Any(item =>
-                item.Id != collection.Id &&
-                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            await ShowMessageAsync("Имя занято", "Коллекция с таким названием уже есть.");
-            return false;
-        }
-
-        collection.Name = name;
-        if (editIcon)
-        {
-            collection.Glyph = selectedGlyph;
-            collection.Color = selectedColor;
-            if (pendingCollectionVisualPath is not null)
-            {
-                try
-                {
-                    collection.VisualAssetPath = (await _resourceVisualService.ImportUserAssetAsync(
-                        pendingCollectionVisualPath,
-                        CancellationToken.None)).AssetPath;
-                }
-                catch (Exception exception)
-                {
-                    await ShowMessageAsync("Не удалось сохранить изображение", exception.Message);
-                    return false;
-                }
-            }
-            else if (resetCollectionVisual)
-            {
-                collection.VisualAssetPath = null;
-            }
-        }
-
-        return true;
     }
 
     private async Task ShowMessageAsync(string title, string message)
@@ -1947,67 +1436,6 @@ public sealed partial class MainPage : Page
             CloseButtonText = "Закрыть",
         };
         await dialog.ShowAsync();
-    }
-
-    private void RebuildCollectionNavItems()
-    {
-        var items = ShellNavigation.MenuItems;
-        for (var index = items.Count - 1; index >= 0; index--)
-        {
-            if (items[index] is NavigationViewItem nav &&
-                (nav.Tag is WorkspaceGroup || Equals(nav.Tag, AddCollectionTag)))
-            {
-                items.RemoveAt(index);
-            }
-        }
-
-        var insertAt = items.Count;
-        for (var index = 0; index < items.Count; index++)
-        {
-            if (items[index] is NavigationViewItemHeader { Content: "Коллекции" })
-            {
-                insertAt = index + 1;
-                break;
-            }
-        }
-
-        foreach (var collection in _collections
-            .OrderBy(item => item.IsTrash)
-            .ThenBy(item => item.SortOrder)
-            .ThenBy(item => item.Name))
-        {
-            items.Insert(insertAt++, CreateCollectionNavItem(collection));
-        }
-
-        items.Insert(insertAt, CreateAddCollectionNavItem());
-    }
-
-    private NavigationViewItem CreateCollectionNavItem(WorkspaceGroup collection)
-    {
-        var item = new NavigationViewItem
-        {
-            Content = CreateNavigationContent(
-                collection.Name,
-                _resources.Count(resource => resource.Collection == collection.Name)),
-            Tag = collection,
-            Icon = CreateCollectionIcon(collection),
-        };
-
-        var flyout = new MenuFlyout();
-        if (collection.IsTrash)
-        {
-            flyout.Items.Add(CreateCollectionMenuItem("Очистить корзину", new SymbolIcon(Symbol.Delete), collection, EmptyTrashMenu_Click));
-        }
-        else
-        {
-            flyout.Items.Add(CreateCollectionMenuItem("Переименовать", new SymbolIcon(Symbol.Rename), collection, RenameCollectionMenu_Click));
-            flyout.Items.Add(CreateCollectionMenuItem("Изменить иконку", new FontIcon { Glyph = "\uE790" }, collection, ChangeCollectionIconMenu_Click));
-            flyout.Items.Add(new MenuFlyoutSeparator());
-            flyout.Items.Add(CreateCollectionMenuItem("Удалить", new SymbolIcon(Symbol.Delete), collection, DeleteCollectionMenu_Click));
-        }
-
-        item.ContextFlyout = flyout;
-        return item;
     }
 
     private static Grid CreateNavigationContent(string name, int count)
@@ -2030,78 +1458,6 @@ public sealed partial class MainPage : Page
         return grid;
     }
 
-    private IconElement CreateCollectionIcon(WorkspaceGroup collection)
-    {
-        var path = _resourceVisualService.GetAbsoluteAssetPath(collection.VisualAssetPath);
-        if (path is not null && File.Exists(path))
-        {
-            try
-            {
-                return new ImageIcon
-                {
-                    Source = new BitmapImage(new Uri(path, UriKind.Absolute)),
-                };
-            }
-            catch (Exception)
-            {
-            }
-        }
-
-        return new FontIcon
-        {
-            Glyph = collection.Glyph,
-            Foreground = BrushFromHex(collection.Color),
-        };
-    }
-
-    private static MenuFlyoutItem CreateCollectionMenuItem(
-        string text,
-        IconElement icon,
-        WorkspaceGroup collection,
-        RoutedEventHandler click)
-    {
-        var item = new MenuFlyoutItem
-        {
-            Text = text,
-            Icon = icon,
-            Tag = collection,
-        };
-        item.Click += click;
-        AutomationProperties.SetName(item, text);
-        return item;
-    }
-
-    private static NavigationViewItem CreateAddCollectionNavItem()
-    {
-        var item = new NavigationViewItem
-        {
-            Content = "Новая коллекция",
-            Tag = AddCollectionTag,
-            SelectsOnInvoked = false,
-            Icon = new FontIcon { Glyph = "\uE710" },
-        };
-        AutomationProperties.SetName(item, "Новая коллекция");
-        return item;
-    }
-
-    private void SelectActiveNavItem()
-    {
-        foreach (var item in ShellNavigation.MenuItems.OfType<NavigationViewItem>())
-        {
-            var isMatch = _activeCollection switch
-            {
-                AllCollectionTag => Equals(item.Tag, AllCollectionTag),
-                FavoritesCollectionTag => Equals(item.Tag, FavoritesCollectionTag),
-                _ => item.Tag is WorkspaceGroup collection && collection.Name == _activeCollection,
-            };
-            if (isMatch)
-            {
-                ShellNavigation.SelectedItem = item;
-                return;
-            }
-        }
-    }
-
     private static SolidColorBrush AccentFor(string kind)
     {
         switch (ResourceTypeMapper.FromStoredKind(kind))
@@ -2120,8 +1476,6 @@ public sealed partial class MainPage : Page
                 return Brush(232, 132, 83);
             case ResourceType.Command:
                 return Brush(109, 92, 231);
-            case ResourceType.Collection:
-                return Brush(225, 178, 62);
             default:
                 ResourceType unreachable = ResourceTypeMapper.FromStoredKind(kind);
                 throw new InvalidOperationException($"Unknown resource type: {unreachable}");
@@ -2165,11 +1519,9 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
         string title,
         string description,
         string kind,
-        string collection,
         string modified,
         string glyph,
         SolidColorBrush accentBrush,
-        bool isFavorite,
         string address = "",
         ResourceVisualDescriptor? visual = null)
     {
@@ -2177,11 +1529,9 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
         Title = title;
         Description = description;
         Kind = kind;
-        Collection = collection;
         Modified = modified;
         Glyph = glyph;
         AccentBrush = accentBrush;
-        IsFavorite = isFavorite;
         Address = address;
         _visual = visual ?? ResourceVisualDescriptor.Auto;
     }
@@ -2194,11 +1544,11 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
     public string Title { get; set; }
     public string Description { get; set; }
     public string Kind { get; set; }
-    public string Collection { get; set; }
+    public HashSet<Guid> TagIds { get; set; } = [];
+    public string TagsDisplay { get; set; } = string.Empty;
     public string Modified { get; set; }
     public string Glyph { get; set; }
     public SolidColorBrush AccentBrush { get; set; }
-    public bool IsFavorite { get; set; }
     public string Address { get; set; }
     public Guid Id { get; set; }
 
@@ -2311,11 +1661,9 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
 
     public Visibility CardDeleteVisibility { get; private set; } = Visibility.Collapsed;
 
-    public Visibility CollectionContextVisibility { get; private set; } = Visibility.Collapsed;
-
     public Visibility SourceColumnVisibility { get; private set; } = Visibility.Visible;
 
-    public Visibility CollectionColumnVisibility { get; private set; } = Visibility.Collapsed;
+    public Visibility TagsColumnVisibility { get; private set; } = Visibility.Collapsed;
 
     public Visibility DateColumnVisibility { get; private set; } = Visibility.Visible;
 
@@ -2367,18 +1715,15 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
     }
 
     public void UpdatePresentation(
-        bool showCollectionContext,
         bool showSourceColumn,
-        bool showCollectionColumn,
+        bool showTagsColumn,
         bool showDateColumn)
     {
-        CollectionContextVisibility = showCollectionContext ? Visibility.Visible : Visibility.Collapsed;
         SourceColumnVisibility = showSourceColumn ? Visibility.Visible : Visibility.Collapsed;
-        CollectionColumnVisibility = showCollectionColumn ? Visibility.Visible : Visibility.Collapsed;
+        TagsColumnVisibility = showTagsColumn ? Visibility.Visible : Visibility.Collapsed;
         DateColumnVisibility = showDateColumn ? Visibility.Visible : Visibility.Collapsed;
-        OnPropertyChanged(nameof(CollectionContextVisibility));
         OnPropertyChanged(nameof(SourceColumnVisibility));
-        OnPropertyChanged(nameof(CollectionColumnVisibility));
+        OnPropertyChanged(nameof(TagsColumnVisibility));
         OnPropertyChanged(nameof(DateColumnVisibility));
         OnPropertyChanged(nameof(SourceOrType));
         OnPropertyChanged(nameof(AccessibleName));
@@ -2386,69 +1731,4 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-}
-
-public sealed class WorkspaceGroup
-{
-    public Guid Id { get; set; }
-
-    public string Name { get; set; } = string.Empty;
-
-    public string Glyph { get; set; } = "\uE8B7";
-
-    public string Color { get; set; } = "#7EA7FF";
-
-    public int SortOrder { get; set; }
-
-    public bool IsDefault { get; set; }
-
-    public bool IsTrash { get; set; }
-
-    public string? VisualAssetPath { get; set; }
-
-    public static WorkspaceGroup FromRecord(CollectionRecord record) => new()
-    {
-        Id = record.Id,
-        Name = record.Name,
-        Glyph = record.Glyph,
-        Color = record.Color,
-        SortOrder = record.SortOrder,
-        IsDefault = record.IsDefault,
-        IsTrash = record.IsTrash,
-        VisualAssetPath = record.VisualAssetPath,
-    };
-
-    public CollectionRecord ToRecord() => new(Id, Name, Glyph, Color, SortOrder, IsDefault, IsTrash, VisualAssetPath);
-}
-
-internal sealed record PersistedResource(
-    string Title,
-    string Description,
-    string Kind,
-    string Collection,
-    string Modified,
-    string Glyph,
-    bool IsFavorite,
-    string Address)
-{
-    public static PersistedResource FromModel(WorkspaceResource resource) => new(
-        resource.Title,
-        resource.Description,
-        resource.Kind,
-        resource.Collection,
-        resource.Modified,
-        resource.Glyph,
-        resource.IsFavorite,
-        resource.Address);
-
-    public WorkspaceResource ToModel() => new(
-        Title,
-        Description,
-        Kind,
-        Collection,
-        Modified,
-        Glyph,
-        new SolidColorBrush(Color.FromArgb(255, 88, 157, 234)),
-        IsFavorite,
-        Address);
 }
