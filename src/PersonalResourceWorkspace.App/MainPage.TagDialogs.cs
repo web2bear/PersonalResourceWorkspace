@@ -2,6 +2,8 @@ using PersonalResourceWorkspace.Application.Models;
 using PersonalResourceWorkspace.Application.Resources;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace PersonalResourceWorkspace.App;
 
@@ -80,8 +82,29 @@ public sealed partial class MainPage
     private async Task ShowSearchEditorAsync(SavedSearchRecord search, bool isNew)
     {
         var nameBox = new TextBox { Header = "Имя поиска", Text = search.Name, IsEnabled = !search.IsSystem };
-        var glyphBox = new TextBox { Header = "Иконка (символ)", Text = search.Glyph };
-        var colorBox = new TextBox { Header = "Цвет (#RRGGBB)", Text = search.Color };
+        var iconChoices = new (string Name, string Glyph)[]
+        {
+            ("Поиск", "\uE721"), ("Главная", "\uE80F"), ("Папка", "\uE8B7"),
+            ("Ссылка", "\uE71B"), ("Избранное", "\uE734"), ("Закрепить", "\uE718"),
+            ("Документ", "\uE8A5"), ("Фильтр", "\uE71C"),
+        };
+        if (!iconChoices.Any(choice => choice.Glyph == search.Glyph))
+            iconChoices = [("Текущая иконка", search.Glyph), .. iconChoices];
+        var iconBox = new ComboBox { Header = "Иконка", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var choice in iconChoices)
+        {
+            var preview = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+            preview.Children.Add(new FontIcon { Glyph = choice.Glyph, FontFamily = new FontFamily("Segoe MDL2 Assets") });
+            preview.Children.Add(new TextBlock { Text = choice.Name, VerticalAlignment = VerticalAlignment.Center });
+            iconBox.Items.Add(new ComboBoxItem { Content = preview, Tag = choice.Glyph });
+        }
+        iconBox.SelectedIndex = Math.Max(0, Array.FindIndex(iconChoices, choice => choice.Glyph == search.Glyph));
+        var initialColor = BrushFromHex(search.Color).Color;
+        var colorPicker = new ColorPicker
+        {
+            Color = initialColor,
+            IsAlphaEnabled = false,
+        };
         var parents = _searches.Where(item => item.Id != search.Id && !IsDescendant(item, search.Id)).ToArray();
         var parentBox = new ComboBox { Header = "Родитель (для отображения)", HorizontalAlignment = HorizontalAlignment.Stretch };
         parentBox.Items.Add("Верхний уровень");
@@ -100,8 +123,9 @@ public sealed partial class MainPage
         }
         var fields = new StackPanel { Spacing = 10, MinWidth = 380 };
         fields.Children.Add(nameBox);
-        fields.Children.Add(glyphBox);
-        fields.Children.Add(colorBox);
+        fields.Children.Add(iconBox);
+        fields.Children.Add(new TextBlock { Text = "Цвет" });
+        fields.Children.Add(colorPicker);
         fields.Children.Add(parentBox);
         fields.Children.Add(new TextBlock { Text = isNew
             ? "Сохраняются только обязательные тэги. Текстовый запрос не сохраняется."
@@ -125,13 +149,15 @@ public sealed partial class MainPage
             PrimaryButtonText = isNew ? "Создать" : "Сохранить", CloseButtonText = "Отмена" };
         dialog.PrimaryButtonClick += (_, args) =>
         {
-            if (string.IsNullOrWhiteSpace(nameBox.Text) || !System.Text.RegularExpressions.Regex.IsMatch(colorBox.Text, "^#[0-9a-fA-F]{6}$"))
+            if (string.IsNullOrWhiteSpace(nameBox.Text))
                 args.Cancel = true;
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
         var updated = search with
         {
-            Name = nameBox.Text.Trim(), Glyph = glyphBox.Text, Color = colorBox.Text,
+            Name = nameBox.Text.Trim(),
+            Glyph = (iconBox.SelectedItem as ComboBoxItem)?.Tag as string ?? iconChoices[0].Glyph,
+            Color = $"#{colorPicker.Color.R:X2}{colorPicker.Color.G:X2}{colorPicker.Color.B:X2}",
             ParentId = search.IsSystem || parentBox.SelectedIndex <= 0 ? null : parents[parentBox.SelectedIndex - 1].Id,
             RequiredTagIds = search.IsSystem ? search.RequiredTagIds : selectors.Where(item => item.Box.IsChecked == true).Select(item => item.Id).ToArray(),
         };

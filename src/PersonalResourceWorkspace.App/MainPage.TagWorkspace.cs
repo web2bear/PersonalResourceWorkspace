@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace PersonalResourceWorkspace.App;
@@ -72,7 +73,7 @@ public sealed partial class MainPage
         {
             Tag = search,
             Content = CreateNavigationContent(search.Name, 0),
-            Icon = new FontIcon { Glyph = search.Glyph, Foreground = BrushFromHex(search.Color) },
+            Icon = new FontIcon { Glyph = search.Glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), Foreground = BrushFromHex(search.Color) },
             AllowDrop = true,
             CanDrag = !search.IsSystem,
         };
