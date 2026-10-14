@@ -9,5 +9,4 @@ public enum ResourceType
     TextSnippet,
     ImageSnippet,
     Command,
-    Collection,
 }

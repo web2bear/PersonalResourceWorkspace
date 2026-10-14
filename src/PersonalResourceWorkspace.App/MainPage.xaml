@@ -46,17 +46,7 @@
                     </Grid>
                 </NavigationViewItem.Content>
             </NavigationViewItem>
-            <NavigationViewItem x:Name="FavoritesNavItem" Tag="favorites">
-                <NavigationViewItem.Icon><FontIcon Glyph="&#xE734;" /></NavigationViewItem.Icon>
-                <NavigationViewItem.Content>
-                    <Grid MinWidth="174" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <TextBlock Text="Избранное" />
-                        <TextBlock x:Name="FavoritesCount" Grid.Column="1" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    </Grid>
-                </NavigationViewItem.Content>
-            </NavigationViewItem>
-            <NavigationViewItemHeader Content="Коллекции" />
+            <NavigationViewItemHeader Content="Сохранённые поиски" />
         </NavigationView.MenuItems>
 
         <Grid
@@ -72,7 +62,7 @@
 
             <Grid x:Name="HeaderGrid" Margin="0,0,0,14" ColumnSpacing="12" RowSpacing="10">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
 
                 <StackPanel x:Name="TitleBlock" Orientation="Horizontal" Spacing="10">
                     <TextBlock x:Name="PageTitle" VerticalAlignment="Center" FontSize="28" FontWeight="SemiBold" Text="Все ресурсы" />
@@ -90,17 +80,25 @@
                     QueryIcon="Find"
                     TextChanged="SearchBox_TextChanged" />
 
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Условия:" VerticalAlignment="Center" />
+                    <StackPanel x:Name="BaseTagsPanel" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" />
+                    <StackPanel x:Name="TemporaryTagsPanel" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" />
+                    <AutoSuggestBox x:Name="TagFilterBox" Width="170" PlaceholderText="Добавить тэг" QuerySubmitted="TagFilter_QuerySubmitted" TextChanged="TagFilter_TextChanged" />
+                    <Button Content="Сохранить поиск" Click="SaveSearch_Click" />
+                </StackPanel>
+
                 <CommandBar
                     x:Name="WorkspaceCommandBar"
-                    Grid.Row="2"
+                    Grid.Row="3"
                     Grid.ColumnSpan="3"
                     HorizontalAlignment="Stretch"
                     Background="Transparent"
                     ClosedDisplayMode="Compact"
                     DefaultLabelPosition="Right"
                     IsDynamicOverflowEnabled="True">
-                    <AppBarButton AutomationProperties.Name="Добавить ресурс" Click="AddResource_Click" Icon="Add" Label="Добавить" />
-                    <AppBarButton AutomationProperties.Name="Создать коллекцию" Click="AddCollection_Click" Icon="NewFolder" Label="Новая коллекция" />
+                    <AppBarButton x:Name="AddResourceButton" AutomationProperties.Name="Добавить ресурс" Click="AddResource_Click" Icon="Add" Label="Добавить" />
+                    <AppBarButton AutomationProperties.Name="Управлять тэгами" Click="ManageTags_Click" Icon="Tag" Label="Тэги" />
                     <AppBarButton AutomationProperties.Name="Сортировка" Icon="Sort" Label="Сортировка">
                         <AppBarButton.Flyout>
                             <MenuFlyout>
@@ -150,7 +148,8 @@
                 x:Name="ResourcesGrid"
                 Grid.Row="1"
                 AutomationProperties.Name="Ресурсы, сетка"
-                CanDragItems="False"
+                CanDragItems="True"
+                DragItemsStarting="Resources_DragItemsStarting"
                 CanReorderItems="False"
                 DoubleTapped="Resources_DoubleTapped"
                 IsItemClickEnabled="True"
@@ -179,6 +178,7 @@
                                 <MenuFlyout>
                                     <MenuFlyoutItem Click="OpenResourceMenu_Click" Icon="OpenFile" Tag="{Binding}" Text="Открыть" />
                                     <MenuFlyoutItem Click="EditResourceMenu_Click" Icon="Edit" Tag="{Binding}" Text="Редактировать" />
+                                    <MenuFlyoutItem Click="RestoreResourceMenu_Click" Tag="{Binding}" Text="Восстановить" />
                                     <MenuFlyoutItem AutomationProperties.Name="Удалить ресурс" Click="DeleteResourceMenu_Click" Icon="Delete" Tag="{Binding}" Text="Удалить" />
                                 </MenuFlyout>
                             </Border.ContextFlyout>
@@ -198,6 +198,7 @@
                                 <StackPanel Grid.Row="1" Padding="8,7,8,6" Spacing="3">
                                     <TextBlock FontSize="14" FontWeight="SemiBold" MaxLines="{x:Bind CardTitleLines, Mode=OneWay}" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind CardTitleVisibility, Mode=OneWay}" />
                                     <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="{x:Bind CardDescriptionLines, Mode=OneWay}" Text="{x:Bind Description}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind CardDescriptionVisibility, Mode=OneWay}" />
+                                    <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind TagsDisplay}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind SourceOrType}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind CardSourceVisibility, Mode=OneWay}" />
                                 </StackPanel>
                             </Grid>
@@ -208,6 +209,8 @@
 
             <ListView
                 x:Name="ResourcesList"
+                CanDragItems="True"
+                DragItemsStarting="Resources_DragItemsStarting"
                 Grid.Row="1"
                 AutomationProperties.Name="Ресурсы, список"
                 DoubleTapped="Resources_DoubleTapped"
@@ -233,6 +236,7 @@
                                 <MenuFlyout>
                                     <MenuFlyoutItem Click="OpenResourceMenu_Click" Icon="OpenFile" Tag="{Binding}" Text="Открыть" />
                                     <MenuFlyoutItem Click="EditResourceMenu_Click" Icon="Edit" Tag="{Binding}" Text="Редактировать" />
+                                    <MenuFlyoutItem Click="RestoreResourceMenu_Click" Tag="{Binding}" Text="Восстановить" />
                                     <MenuFlyoutItem AutomationProperties.Name="Удалить ресурс" Click="DeleteResourceMenu_Click" Icon="Delete" Tag="{Binding}" Text="Удалить" />
                                 </MenuFlyout>
                             </Grid.ContextFlyout>
@@ -246,7 +250,7 @@
                             </Border>
                             <TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" MaxLines="1" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
                             <TextBlock Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind SourceOrType}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind SourceColumnVisibility, Mode=OneWay}" />
-                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind Collection}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind CollectionColumnVisibility, Mode=OneWay}" />
+                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind TagsDisplay}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind TagsColumnVisibility, Mode=OneWay}" />
                             <TextBlock Grid.Column="4" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind Modified}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind DateColumnVisibility, Mode=OneWay}" />
                         </Grid>
                     </DataTemplate>

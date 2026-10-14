@@ -12,7 +12,6 @@ public static class StoredResourceKinds
     public const string Note = "Заметка";
     public const string Image = "Изображение";
     public const string Command = "Команда";
-    public const string Collection = "Коллекция";
 
     public static readonly string[] EditorKinds = [Application, Web, File, Folder, Note, Image, Command];
 }
@@ -52,11 +51,6 @@ public static class ResourceTypeMapper
             return ResourceType.Command;
         }
 
-        if (string.Equals(kind, StoredResourceKinds.Collection, StringComparison.Ordinal))
-        {
-            return ResourceType.Collection;
-        }
-
         return ResourceType.File;
     }
 
@@ -78,8 +72,6 @@ public static class ResourceTypeMapper
                 return StoredResourceKinds.Image;
             case ResourceType.Command:
                 return StoredResourceKinds.Command;
-            case ResourceType.Collection:
-                return StoredResourceKinds.Collection;
             default:
                 ResourceType unreachable = type;
                 throw new InvalidOperationException($"Unknown resource type: {unreachable}");
@@ -106,8 +98,6 @@ public static class ResourceTypeMapper
                 return "\uEB9F";
             case ResourceType.Command:
                 return "\uE756";
-            case ResourceType.Collection:
-                return "\uE8B7";
             default:
                 ResourceType unreachable = type;
                 throw new InvalidOperationException($"Unknown resource type: {unreachable}");

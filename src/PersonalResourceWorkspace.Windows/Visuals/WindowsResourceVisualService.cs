@@ -101,8 +101,6 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
                         null,
                         CreateTextPreview(request.Address, request.Description),
                         "Предпросмотр текста");
-                case ResourceType.Collection:
-                    return Fallback(ResourceVisualMode.Auto, fingerprint);
                 default:
                     return Fallback(ResourceVisualMode.Auto, fingerprint);
             }

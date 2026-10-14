@@ -19,11 +19,10 @@ public static class DependencyInjection
             var databasePath = Path.Combine(pathProvider.GetLocalDataRoot(), "Data", "workspace.db");
             return new SqliteConnectionFactory(databasePath);
         });
-        services.AddSingleton<IApplicationInitializer, SqliteMigrationRunner>();
+        services.AddSingleton<IApplicationInitializer, SqliteWorkspaceInitializer>();
         services.AddSingleton<IUserPreferenceStore, SqliteUserPreferenceStore>();
-        services.AddSingleton<ICollectionViewPreferenceStore, SqliteCollectionViewPreferenceStore>();
-        services.AddSingleton<IResourceRepository, SqliteResourceRepository>();
-        services.AddSingleton<ICollectionRepository, SqliteCollectionRepository>();
+        services.AddSingleton<IResourceViewPreferenceStore, SqliteResourceViewPreferenceStore>();
+        services.AddSingleton<IWorkspaceRepository, SqliteWorkspaceRepository>();
         return services;
     }
 }

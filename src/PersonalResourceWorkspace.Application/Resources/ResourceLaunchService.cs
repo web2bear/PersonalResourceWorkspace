@@ -18,7 +18,6 @@ public sealed class ResourceLaunchService(IShellLauncher shellLauncher, IClipboa
             case ResourceType.Folder:
             case ResourceType.ImageSnippet:
             case ResourceType.Command:
-            case ResourceType.Collection:
                 await LaunchPathAsync(address, cancellationToken);
                 break;
             case ResourceType.TextSnippet:
