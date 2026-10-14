@@ -1201,6 +1201,7 @@ public sealed partial class MainPage : Page
 
     private async Task ResolveVisualAsync(WorkspaceResource resource, bool forceRefresh)
     {
+        resource.IsVisualLoading = true;
         try
         {
             var previousDescriptor = resource.Visual;
@@ -1235,6 +1236,10 @@ public sealed partial class MainPage : Page
                     null,
                     "Значок типа"),
                 null);
+        }
+        finally
+        {
+            resource.IsVisualLoading = false;
         }
     }
 
@@ -1538,6 +1543,7 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
 
     private ResourceVisualDescriptor _visual;
     private ImageSource? _visualImage;
+    private bool _isVisualLoading;
     private string _visualPreviewText = string.Empty;
     private string _visualSourceLabel = "Значок типа";
 
@@ -1590,6 +1596,24 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
             OnPropertyChanged(nameof(IconSurfaceVisibility));
         }
     }
+
+    public bool IsVisualLoading
+    {
+        get => _isVisualLoading;
+        set
+        {
+            if (_isVisualLoading == value)
+            {
+                return;
+            }
+
+            _isVisualLoading = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(VisualLoadingVisibility));
+        }
+    }
+
+    public Visibility VisualLoadingVisibility => IsVisualLoading ? Visibility.Visible : Visibility.Collapsed;
 
     public string VisualPreviewText
     {

@@ -190,6 +190,12 @@
                                         <Image Margin="{x:Bind VisualImageMargin, Mode=OneWay}" AutomationProperties.AccessibilityView="Raw" Source="{x:Bind VisualImage, Mode=OneWay}" Stretch="{x:Bind VisualStretch, Mode=OneWay}" Visibility="{x:Bind VisualImageVisibility, Mode=OneWay}" />
                                         <TextBlock Margin="14" VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" MaxLines="3" Text="{x:Bind VisualPreviewText, Mode=OneWay}" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" Visibility="{x:Bind GeneratedPreviewVisibility, Mode=OneWay}" />
                                         <FontIcon FontSize="34" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" Glyph="{x:Bind Glyph}" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
+                                        <Border HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="8" Padding="8,5" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" CornerRadius="6" Visibility="{x:Bind VisualLoadingVisibility, Mode=OneWay}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <ProgressRing Width="16" Height="16" IsActive="{x:Bind IsVisualLoading, Mode=OneWay}" />
+                                                <TextBlock VerticalAlignment="Center" FontSize="12" Text="Получаем превью…" />
+                                            </StackPanel>
+                                        </Border>
                                         <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4" Click="DeleteResourceButton_Click" Tag="{Binding}" ToolTipService.ToolTip="Удалить ресурс" Visibility="{x:Bind CardDeleteVisibility, Mode=OneWay}">
                                             <SymbolIcon Symbol="Delete" />
                                         </Button>
@@ -248,7 +254,10 @@
                                     <FontIcon FontSize="18" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" Glyph="{x:Bind Glyph}" Visibility="{x:Bind FallbackVisibility, Mode=OneWay}" />
                                 </Grid>
                             </Border>
-                            <TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" MaxLines="1" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock FontWeight="SemiBold" MaxLines="1" Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Получаем превью…" Visibility="{x:Bind VisualLoadingVisibility, Mode=OneWay}" />
+                            </StackPanel>
                             <TextBlock Grid.Column="2" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind SourceOrType}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind SourceColumnVisibility, Mode=OneWay}" />
                             <TextBlock Grid.Column="3" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1" Text="{x:Bind TagsDisplay}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind TagsColumnVisibility, Mode=OneWay}" />
                             <TextBlock Grid.Column="4" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}" MaxLines="1" Text="{x:Bind Modified}" TextTrimming="CharacterEllipsis" Visibility="{x:Bind DateColumnVisibility, Mode=OneWay}" />

@@ -647,7 +647,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
     private static async Task WriteValidatedImageAsync(string destination, byte[] bytes, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $"{Guid.NewGuid():N}.tmp");
         try
         {
             await File.WriteAllBytesAsync(temporary, bytes, cancellationToken).ConfigureAwait(false);
