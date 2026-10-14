@@ -45,6 +45,10 @@ public sealed partial class MainPage
 
     private void RebuildSearchNavItems()
     {
+        var expandedSearches = _searchNavItems
+            .Where(pair => pair.Value.IsExpanded)
+            .Select(pair => pair.Key)
+            .ToHashSet();
         for (var index = ShellNavigation.MenuItems.Count - 1; index >= 0; index--)
         {
             if (ShellNavigation.MenuItems[index] is NavigationViewItem item && item.Tag is SavedSearchRecord)
@@ -64,6 +68,8 @@ public sealed partial class MainPage
             else
                 ShellNavigation.MenuItems.Add(_searchNavItems[search.Id]);
         }
+        foreach (var id in expandedSearches)
+            if (_searchNavItems.TryGetValue(id, out var item)) item.IsExpanded = true;
         _rootDropItem = new NavigationViewItem
         {
             Content = "Перетащите сюда для верхнего уровня",
@@ -306,6 +312,9 @@ public sealed partial class MainPage
                 }
             }
             RebuildSearchNavItems();
+            for (var currentParent = parentId; currentParent is { } id;
+                 currentParent = _searches.FirstOrDefault(item => item.Id == id)?.ParentId)
+                if (_searchNavItems.TryGetValue(id, out var parentItem)) parentItem.IsExpanded = true;
             StatusText.Text = $"Перемещён поиск «{source.Name}»";
         }
         catch (Exception exception)
