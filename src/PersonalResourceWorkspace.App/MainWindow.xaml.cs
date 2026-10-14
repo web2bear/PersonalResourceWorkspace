@@ -17,7 +17,9 @@ public sealed partial class MainWindow : Window
         ResourceLaunchService resourceLaunchService,
         IClipboardService clipboardService,
         IResourceVisualService resourceVisualService,
-        ICollectionViewPreferenceStore viewPreferenceStore)
+        ICollectionViewPreferenceStore viewPreferenceStore,
+        IUserPreferenceStore userPreferences,
+        IPortableDataDirectory dataDirectory)
     {
         InitializeComponent();
 
@@ -26,7 +28,7 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
 
-        _mainPage = new MainPage(this, resourceRepository, collectionRepository, resourceLaunchService, clipboardService, resourceVisualService, viewPreferenceStore);
+        _mainPage = new MainPage(this, resourceRepository, collectionRepository, resourceLaunchService, clipboardService, resourceVisualService, viewPreferenceStore, userPreferences, dataDirectory);
         RootFrame.Content = _mainPage;
         Activated += MainWindow_Activated;
         Closed += MainWindow_Closed;

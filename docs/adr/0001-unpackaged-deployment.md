@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-09-10
 
+> Расположение пользовательских данных в этом ADR заменено [ADR 0003](0003-portable-data-and-settings.md). Текущий код использует portable-каталог `content` по умолчанию.
+
 ## Context
 
 The contract prefers packaged deployment but explicitly allows unpackaged deployment when direct agent-driven executable launch is required. The official packaged template built successfully, but the audited sandbox cannot register a loose-layout MSIX: Windows deployment reports that the current token has no resolvable user-profile type (`0x80073D19`, inner `0x80070002`). Installing the signed Windows App Runtime also failed under the sandbox deployment API (`0x80070570`). Granting access to the package directories did not change the profile-token failure.

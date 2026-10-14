@@ -61,6 +61,8 @@ public sealed partial class MainPage : Page
     private readonly IClipboardService _clipboardService;
     private readonly IResourceVisualService _resourceVisualService;
     private readonly ICollectionViewPreferenceStore _viewPreferenceStore;
+    private readonly IUserPreferenceStore _userPreferences;
+    private readonly IPortableDataDirectory _dataDirectory;
     private readonly Window _window;
     private CollectionViewMode _viewMode = CollectionViewMode.Grid;
     private ResourceSortMode _sortMode = ResourceSortMode.Title;
@@ -78,7 +80,9 @@ public sealed partial class MainPage : Page
         ResourceLaunchService resourceLaunchService,
         IClipboardService clipboardService,
         IResourceVisualService resourceVisualService,
-        ICollectionViewPreferenceStore viewPreferenceStore)
+        ICollectionViewPreferenceStore viewPreferenceStore,
+        IUserPreferenceStore userPreferences,
+        IPortableDataDirectory dataDirectory)
     {
         _window = window;
         _resourceRepository = resourceRepository;
@@ -87,6 +91,8 @@ public sealed partial class MainPage : Page
         _clipboardService = clipboardService;
         _resourceVisualService = resourceVisualService;
         _viewPreferenceStore = viewPreferenceStore;
+        _userPreferences = userPreferences;
+        _dataDirectory = dataDirectory;
         InitializeComponent();
         if (ShellNavigation.SettingsItem is NavigationViewItem settingsItem)
         {
@@ -104,6 +110,7 @@ public sealed partial class MainPage : Page
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
         await RestoreViewModeAsync();
+        await RestoreSortModeAsync();
         await LoadCollectionsAsync();
         await LoadResourcesAsync();
         UpdateResponsiveLayout(ActualWidth);
@@ -117,12 +124,11 @@ public sealed partial class MainPage : Page
             ? brush
             : fallback;
 
-    private void ShellNavigation_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    private async void ShellNavigation_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.IsSettingsInvoked)
         {
-            PageTitle.Text = "Настройки";
-            StatusText.Text = "Раздел настроек будет добавлен позднее";
+            await ShowSettingsAsync();
             return;
         }
 
@@ -344,20 +350,87 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void SortByTitle_Click(object sender, RoutedEventArgs e)
+    private async void SortByTitle_Click(object sender, RoutedEventArgs e)
     {
         _sortMode = ResourceSortMode.Title;
         SortByTitleItem.IsChecked = true;
         SortByModifiedItem.IsChecked = false;
         ApplyFilter();
+        await SaveSortModeAsync();
     }
 
-    private void SortByModified_Click(object sender, RoutedEventArgs e)
+    private async void SortByModified_Click(object sender, RoutedEventArgs e)
     {
         _sortMode = ResourceSortMode.Modified;
         SortByTitleItem.IsChecked = false;
         SortByModifiedItem.IsChecked = true;
         ApplyFilter();
+        await SaveSortModeAsync();
+    }
+
+    private async Task RestoreSortModeAsync()
+    {
+        try
+        {
+            _sortMode = string.Equals(await _userPreferences.GetAsync("sort-mode", CancellationToken.None), "modified", StringComparison.OrdinalIgnoreCase)
+                ? ResourceSortMode.Modified : ResourceSortMode.Title;
+            SortByTitleItem.IsChecked = _sortMode == ResourceSortMode.Title;
+            SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
+            ApplyFilter();
+        }
+        catch (Exception exception) { StatusText.Text = $"Не удалось восстановить сортировку: {exception.Message}"; }
+    }
+
+    private async Task SaveSortModeAsync()
+    {
+        try { await _userPreferences.SetAsync("sort-mode", _sortMode == ResourceSortMode.Modified ? "modified" : "title", CancellationToken.None); }
+        catch (Exception exception) { StatusText.Text = $"Не удалось сохранить сортировку: {exception.Message}"; }
+    }
+
+    private async Task ShowSettingsAsync()
+    {
+        var rootLabel = new TextBlock { Text = $"Каталог данных (источник: {_dataDirectory.Source})" };
+        var pathBox = new TextBox { Text = _dataDirectory.GetLocalDataRoot(), IsEnabled = !_dataDirectory.IsOverridden };
+        var browse = new Button { Content = "Выбрать каталог", IsEnabled = !_dataDirectory.IsOverridden };
+        browse.Click += async (_, _) =>
+        {
+            var picker = new FolderPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(_window));
+            var selected = await picker.PickSingleFolderAsync();
+            if (selected is not null) pathBox.Text = selected.Path;
+        };
+        var viewBox = new ComboBox { Header = "Вид ресурсов" };
+        viewBox.Items.Add("Сетка"); viewBox.Items.Add("Список");
+        viewBox.SelectedIndex = _viewMode == CollectionViewMode.List ? 1 : 0;
+        var sortBox = new ComboBox { Header = "Сортировка" };
+        sortBox.Items.Add("По названию"); sortBox.Items.Add("По дате изменения");
+        sortBox.SelectedIndex = _sortMode == ResourceSortMode.Modified ? 1 : 0;
+        var stack = new StackPanel { Spacing = 12, MinWidth = 400 };
+        stack.Children.Add(rootLabel); stack.Children.Add(pathBox); stack.Children.Add(browse);
+        if (_dataDirectory.IsOverridden)
+            stack.Children.Add(new TextBlock { Text = "Путь задан извне. Измените параметр запуска или переменную окружения, чтобы выбрать другой каталог.", TextWrapping = TextWrapping.Wrap });
+        stack.Children.Add(viewBox); stack.Children.Add(sortBox);
+        var dialog = new ContentDialog
+        {
+            Title = "Настройки", Content = stack, PrimaryButtonText = "Сохранить", CloseButtonText = "Отмена",
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        try
+        {
+            var requestedRoot = Path.GetFullPath(Path.IsPathFullyQualified(pathBox.Text) ? pathBox.Text : Path.Combine(AppContext.BaseDirectory, pathBox.Text));
+            var changedRoot = !string.Equals(requestedRoot, _dataDirectory.GetLocalDataRoot(), StringComparison.OrdinalIgnoreCase);
+            await SetViewModeAsync(viewBox.SelectedIndex == 1 ? CollectionViewMode.List : CollectionViewMode.Grid, persist: true);
+            _sortMode = sortBox.SelectedIndex == 1 ? ResourceSortMode.Modified : ResourceSortMode.Title;
+            SortByTitleItem.IsChecked = _sortMode == ResourceSortMode.Title;
+            SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
+            ApplyFilter();
+            await SaveSortModeAsync();
+            if (changedRoot) await _dataDirectory.RelocateAsync(pathBox.Text, CancellationToken.None);
+            StatusText.Text = changedRoot ? "Данные скопированы. Перезапустите приложение для перехода в новый каталог." : "Настройки сохранены.";
+        }
+        catch (Exception exception) { StatusText.Text = $"Не удалось сохранить настройки: {exception.Message}"; }
     }
 
     private void MainPage_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
