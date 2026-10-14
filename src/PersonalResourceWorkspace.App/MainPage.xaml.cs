@@ -65,6 +65,11 @@ public sealed partial class MainPage : Page
     private readonly IPortableDataDirectory _dataDirectory;
     private readonly Window _window;
     private CollectionViewMode _viewMode = CollectionViewMode.Grid;
+    private int _cardSize = 1;
+    private int _maximumGridColumns = 8;
+    private bool _showCardTitle = true;
+    private bool _showCardDescription;
+    private bool _showCardDeleteButton;
     private ResourceSortMode _sortMode = ResourceSortMode.Title;
     private WorkspaceResource? _selectedResource;
     private bool _synchronizingSelection;
@@ -110,6 +115,7 @@ public sealed partial class MainPage : Page
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
         await RestoreViewModeAsync();
+        await RestoreGridPreferencesAsync();
         await RestoreSortModeAsync();
         await LoadCollectionsAsync();
         await LoadResourcesAsync();
@@ -246,6 +252,14 @@ public sealed partial class MainPage : Page
     private async void DeleteResourceMenu_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuFlyoutItem { Tag: WorkspaceResource resource })
+        {
+            await DeleteResourceAsync(resource);
+        }
+    }
+
+    private async void DeleteResourceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: WorkspaceResource resource })
         {
             await DeleteResourceAsync(resource);
         }
@@ -406,14 +420,26 @@ public sealed partial class MainPage : Page
         var sortBox = new ComboBox { Header = "Сортировка" };
         sortBox.Items.Add("По названию"); sortBox.Items.Add("По дате изменения");
         sortBox.SelectedIndex = _sortMode == ResourceSortMode.Modified ? 1 : 0;
+        var cardSizeBox = new ComboBox { Header = "Размер карточек" };
+        cardSizeBox.Items.Add("Маленький"); cardSizeBox.Items.Add("Средний"); cardSizeBox.Items.Add("Большой");
+        cardSizeBox.SelectedIndex = _cardSize;
+        var columnsBox = new ComboBox { Header = "Столбцов не более" };
+        for (var columns = 2; columns <= 8; columns++) columnsBox.Items.Add(columns);
+        columnsBox.SelectedIndex = _maximumGridColumns - 2;
+        var titleSwitch = new ToggleSwitch { Header = "Показывать название карточки", IsOn = _showCardTitle };
+        var descriptionSwitch = new ToggleSwitch { Header = "Показывать дополнительный текст", IsOn = _showCardDescription };
+        var deleteSwitch = new ToggleSwitch { Header = "Показывать кнопку удаления", IsOn = _showCardDeleteButton };
         var stack = new StackPanel { Spacing = 12, MinWidth = 400 };
         stack.Children.Add(rootLabel); stack.Children.Add(pathBox); stack.Children.Add(browse);
         if (_dataDirectory.IsOverridden)
             stack.Children.Add(new TextBlock { Text = "Путь задан извне. Измените параметр запуска или переменную окружения, чтобы выбрать другой каталог.", TextWrapping = TextWrapping.Wrap });
         stack.Children.Add(viewBox); stack.Children.Add(sortBox);
+        stack.Children.Add(new TextBlock { Text = "Сетка", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        stack.Children.Add(cardSizeBox); stack.Children.Add(columnsBox);
+        stack.Children.Add(titleSwitch); stack.Children.Add(descriptionSwitch); stack.Children.Add(deleteSwitch);
         var dialog = new ContentDialog
         {
-            Title = "Настройки", Content = stack, PrimaryButtonText = "Сохранить", CloseButtonText = "Отмена",
+            Title = "Настройки", Content = new ScrollViewer { Content = stack, MaxHeight = 540 }, PrimaryButtonText = "Сохранить", CloseButtonText = "Отмена",
             DefaultButton = ContentDialogButton.Primary, XamlRoot = XamlRoot,
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
@@ -427,6 +453,13 @@ public sealed partial class MainPage : Page
             SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
             ApplyFilter();
             await SaveSortModeAsync();
+            _cardSize = cardSizeBox.SelectedIndex;
+            _maximumGridColumns = columnsBox.SelectedIndex + 2;
+            _showCardTitle = titleSwitch.IsOn;
+            _showCardDescription = descriptionSwitch.IsOn;
+            _showCardDeleteButton = deleteSwitch.IsOn;
+            UpdateResponsiveLayout(ActualWidth);
+            await SaveGridPreferencesAsync();
             if (changedRoot) await _dataDirectory.RelocateAsync(pathBox.Text, CancellationToken.None);
             StatusText.Text = changedRoot ? "Данные скопированы. Перезапустите приложение для перехода в новый каталог." : "Настройки сохранены.";
         }
@@ -434,6 +467,31 @@ public sealed partial class MainPage : Page
     }
 
     private void MainPage_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
+
+    private async Task RestoreGridPreferencesAsync()
+    {
+        try
+        {
+            var size = await _userPreferences.GetAsync("grid-card-size", CancellationToken.None);
+            var columns = await _userPreferences.GetAsync("grid-max-columns", CancellationToken.None);
+            _cardSize = int.TryParse(size, out var parsedSize) ? Math.Clamp(parsedSize, 0, 2) : 1;
+            _maximumGridColumns = int.TryParse(columns, out var parsedColumns) ? Math.Clamp(parsedColumns, 2, 8) : 8;
+            _showCardTitle = await _userPreferences.GetAsync("grid-show-title", CancellationToken.None) != "false";
+            _showCardDescription = await _userPreferences.GetAsync("grid-show-description", CancellationToken.None) == "true";
+            _showCardDeleteButton = await _userPreferences.GetAsync("grid-show-delete", CancellationToken.None) == "true";
+            UpdateResponsiveLayout(ActualWidth);
+        }
+        catch (Exception exception) { StatusText.Text = $"Не удалось восстановить настройки сетки: {exception.Message}"; }
+    }
+
+    private async Task SaveGridPreferencesAsync()
+    {
+        await _userPreferences.SetAsync("grid-card-size", _cardSize.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
+        await _userPreferences.SetAsync("grid-max-columns", _maximumGridColumns.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
+        await _userPreferences.SetAsync("grid-show-title", _showCardTitle ? "true" : "false", CancellationToken.None);
+        await _userPreferences.SetAsync("grid-show-description", _showCardDescription ? "true" : "false", CancellationToken.None);
+        await _userPreferences.SetAsync("grid-show-delete", _showCardDeleteButton ? "true" : "false", CancellationToken.None);
+    }
 
     private void UpdateResponsiveLayout(double width)
     {
@@ -443,16 +501,11 @@ public sealed partial class MainPage : Page
 
         if (ResourcesGrid.ItemsPanelRoot is ItemsWrapGrid wrapGrid && ResourcesGrid.ActualWidth > 0)
         {
-            var available = Math.Max(210, ResourcesGrid.ActualWidth - 4);
-            if (available < 460)
-            {
-                wrapGrid.ItemWidth = available;
-            }
-            else
-            {
-                var columns = Math.Max(1, (int)Math.Floor((available + 12) / 222));
-                wrapGrid.ItemWidth = Math.Clamp((available - ((columns - 1) * 12)) / columns, 210, 230);
-            }
+            var targetWidth = _cardSize switch { 0 => 184d, 2 => 304d, _ => 224d };
+            var available = Math.Max(1, ResourcesGrid.ActualWidth - 4);
+            var columns = Math.Clamp((int)Math.Floor((available + 12) / (targetWidth + 12)), 1, _maximumGridColumns);
+            wrapGrid.ItemWidth = Math.Min(targetWidth, Math.Max(1, available - 12 * (columns - 1)) / columns);
+            wrapGrid.ItemHeight = _cardSize switch { 0 => 174, 2 => 312, _ => 234 };
         }
 
         UpdateResourcePresentation(width);
@@ -1346,6 +1399,7 @@ public sealed partial class MainPage : Page
                 showSourceColumn: width >= 660,
                 showCollectionColumn: showCollectionContext && width >= 850,
                 showDateColumn: width >= 1020);
+            resource.UpdateCardPresentation(_cardSize, _showCardTitle, _showCardDescription, _showCardDeleteButton);
         }
     }
 
@@ -2241,6 +2295,22 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
 
     public string AccessibleName => $"{Title}, {Kind}";
 
+    public string HoverDescription => string.IsNullOrWhiteSpace(Description) ? Title : $"{Title}\n{Description}";
+
+    public GridLength CardPreviewHeight { get; private set; } = new(126);
+
+    public int CardTitleLines { get; private set; } = 2;
+
+    public int CardDescriptionLines { get; private set; } = 2;
+
+    public Visibility CardTitleVisibility { get; private set; } = Visibility.Visible;
+
+    public Visibility CardDescriptionVisibility { get; private set; } = Visibility.Collapsed;
+
+    public Visibility CardSourceVisibility { get; private set; } = Visibility.Visible;
+
+    public Visibility CardDeleteVisibility { get; private set; } = Visibility.Collapsed;
+
     public Visibility CollectionContextVisibility { get; private set; } = Visibility.Collapsed;
 
     public Visibility SourceColumnVisibility { get; private set; } = Visibility.Visible;
@@ -2267,6 +2337,26 @@ public sealed class WorkspaceResource : INotifyPropertyChanged
             : Visibility.Collapsed;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void UpdateCardPresentation(int size, bool showTitle, bool showDescription, bool showDelete)
+    {
+        CardPreviewHeight = new GridLength(size switch { 0 => 112, 2 => 178, _ => 126 });
+        CardTitleLines = size == 0 ? 1 : 2;
+        CardDescriptionLines = size switch { 0 => 1, 2 => 3, _ => 2 };
+        CardTitleVisibility = showTitle ? Visibility.Visible : Visibility.Collapsed;
+        CardDescriptionVisibility = showDescription && !string.IsNullOrWhiteSpace(Description)
+            ? Visibility.Visible : Visibility.Collapsed;
+        CardSourceVisibility = size == 0 ? Visibility.Collapsed : Visibility.Visible;
+        CardDeleteVisibility = showDelete ? Visibility.Visible : Visibility.Collapsed;
+        OnPropertyChanged(nameof(CardPreviewHeight));
+        OnPropertyChanged(nameof(CardTitleLines));
+        OnPropertyChanged(nameof(CardDescriptionLines));
+        OnPropertyChanged(nameof(CardTitleVisibility));
+        OnPropertyChanged(nameof(CardDescriptionVisibility));
+        OnPropertyChanged(nameof(CardSourceVisibility));
+        OnPropertyChanged(nameof(CardDeleteVisibility));
+        OnPropertyChanged(nameof(HoverDescription));
+    }
 
     public void ApplyVisualResolution(ResourceVisualResolution resolution, ImageSource? imageSource)
     {
