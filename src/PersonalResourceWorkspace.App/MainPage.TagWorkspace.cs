@@ -12,6 +12,7 @@ namespace PersonalResourceWorkspace.App;
 public sealed partial class MainPage
 {
     private readonly Dictionary<Guid, NavigationViewItem> _searchNavItems = [];
+    private NavigationViewItem? _rootDropItem;
 
     private IReadOnlyList<Guid> ActiveRequiredTags() =>
         _searches.FirstOrDefault(search => search.Id == _activeSearchId)?.RequiredTagIds ?? [];
@@ -50,6 +51,7 @@ public sealed partial class MainPage
                 ShellNavigation.MenuItems.RemoveAt(index);
         }
         _searchNavItems.Clear();
+        if (_rootDropItem is not null) ShellNavigation.MenuItems.Remove(_rootDropItem);
         foreach (var search in _searches)
         {
             var item = CreateSearchNavItem(search);
@@ -62,6 +64,28 @@ public sealed partial class MainPage
             else
                 ShellNavigation.MenuItems.Add(_searchNavItems[search.Id]);
         }
+        _rootDropItem = new NavigationViewItem
+        {
+            Content = "Перетащите сюда для верхнего уровня",
+            Icon = new SymbolIcon(Symbol.Up),
+            AllowDrop = true,
+            SelectsOnInvoked = false,
+        };
+        AutomationProperties.SetName(_rootDropItem, "Переместить поиск на верхний уровень");
+        _rootDropItem.DragOver += (_, args) =>
+        {
+            args.AcceptedOperation = TryGetDraggedSearch(args.DataView.Properties, out var id) &&
+                _searches.Any(search => search.Id == id && !search.IsSystem)
+                ? DataPackageOperation.Move : DataPackageOperation.None;
+            args.Handled = true;
+        };
+        _rootDropItem.Drop += async (_, args) =>
+        {
+            args.Handled = true;
+            if (TryGetDraggedSearch(args.DataView.Properties, out var id))
+                await MoveSearchToIndexAsync(id, null, _searches.Count(search => search.ParentId is null));
+        };
+        ShellNavigation.MenuItems.Add(_rootDropItem);
         ShellNavigation.SelectedItem = _activeSearchId is { } active && _searchNavItems.TryGetValue(active, out var selected)
             ? selected : AllResourcesNavItem;
         UpdateSearchCounts();
@@ -72,7 +96,7 @@ public sealed partial class MainPage
         var item = new NavigationViewItem
         {
             Tag = search,
-            Content = CreateNavigationContent(search.Name, 0),
+            Content = CreateSearchDropContent(search.Name, 0),
             Icon = new FontIcon { Glyph = search.Glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), Foreground = BrushFromHex(search.Color) },
             AllowDrop = true,
             CanDrag = !search.IsSystem,
@@ -83,13 +107,21 @@ public sealed partial class MainPage
         {
             if (args.DataView.Properties.ContainsKey("ResourceId"))
                 args.AcceptedOperation = CanDropResourceOn(search) ? DataPackageOperation.Copy : DataPackageOperation.None;
-            else if (args.DataView.Properties.ContainsKey("SearchId"))
-                args.AcceptedOperation = DataPackageOperation.Move;
+            else if (TryGetDraggedSearch(args.DataView.Properties, out var sourceId))
+            {
+                var source = _searches.FirstOrDefault(candidate => candidate.Id == sourceId);
+                var valid = source is not null && !source.IsSystem && sourceId != search.Id &&
+                    !IsDescendant(search, sourceId);
+                args.AcceptedOperation = valid ? DataPackageOperation.Move : DataPackageOperation.None;
+                ShowSearchDropZone(item, valid ? SearchDropPosition(args.GetPosition(item).Y, item.ActualHeight) : -1);
+            }
             args.Handled = true;
         };
+        item.DragLeave += (_, _) => ShowSearchDropZone(item, -1);
         item.Drop += async (_, args) =>
         {
             args.Handled = true;
+            ShowSearchDropZone(item, -1);
             if (args.DataView.Properties.TryGetValue("ResourceId", out var resourceValue) &&
                 Guid.TryParse(resourceValue as string, out var resourceId))
             {
@@ -99,13 +131,13 @@ public sealed partial class MainPage
             else if (args.DataView.Properties.TryGetValue("SearchId", out var searchValue) &&
                      Guid.TryParse(searchValue as string, out var sourceId))
             {
-                var position = args.GetPosition(item);
-                if (position.Y < item.ActualHeight * 0.25)
+                var position = SearchDropPosition(args.GetPosition(item).Y, item.ActualHeight);
+                if (position == 0)
                     await MoveSearchRelativeAsync(sourceId, search, before: true);
-                else if (position.Y > item.ActualHeight * 0.75)
+                else if (position == 2)
                     await MoveSearchRelativeAsync(sourceId, search, before: false);
                 else
-                    await MoveSearchAsync(sourceId, search.Id, null);
+                    await MoveSearchToIndexAsync(sourceId, search.Id, 0);
             }
         };
         var flyout = new MenuFlyout();
@@ -122,6 +154,34 @@ public sealed partial class MainPage
             AddSearchMenuItem(flyout, "Очистить корзину", EmptyTagTrashAsync);
         item.ContextFlyout = flyout;
         return item;
+    }
+
+    private static bool TryGetDraggedSearch(DataPackagePropertySetView properties, out Guid id)
+    {
+        id = default;
+        return properties.TryGetValue("SearchId", out var value) && Guid.TryParse(value as string, out id);
+    }
+
+    private static int SearchDropPosition(double y, double height) =>
+        y < height * 0.25 ? 0 : y > height * 0.75 ? 2 : 1;
+
+    private static Grid CreateSearchDropContent(string name, int count)
+    {
+        var content = CreateNavigationContent(name, count);
+        var grid = new Grid();
+        grid.Children.Add(content);
+        grid.Children.Add(new Border { Height = 3, VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 76, 156, 255)), Visibility = Visibility.Collapsed });
+        grid.Children.Add(new Border { Height = 3, VerticalAlignment = VerticalAlignment.Bottom,
+            Background = new SolidColorBrush(global::Windows.UI.Color.FromArgb(255, 76, 156, 255)), Visibility = Visibility.Collapsed });
+        return grid;
+    }
+
+    private static void ShowSearchDropZone(NavigationViewItem item, int position)
+    {
+        if (item.Content is not Grid grid || grid.Children.Count < 3) return;
+        grid.Children[1].Visibility = position == 0 ? Visibility.Visible : Visibility.Collapsed;
+        grid.Children[2].Visibility = position == 2 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void AddSearchMenuItem(MenuFlyout flyout, string title, Func<Task> action)
@@ -175,32 +235,41 @@ public sealed partial class MainPage
         var index = siblings.FindIndex(item => item.Id == search.Id);
         var other = index + direction;
         if (index < 0 || other < 0 || other >= siblings.Count) return;
-        (siblings[index], siblings[other]) = (siblings[other], siblings[index]);
-        for (var position = 0; position < siblings.Count; position++)
-        {
-            var updated = siblings[position] with { SortOrder = position };
-            await _workspaceRepository.SaveSearchAsync(updated, CancellationToken.None);
-            var current = _searches.FindIndex(item => item.Id == updated.Id);
-            _searches[current] = updated;
-        }
-        RebuildSearchNavItems();
+        await MoveSearchToIndexAsync(search.Id, search.ParentId, other);
     }
 
     private async Task MoveSearchAsync(Guid id, Guid? parentId, int? sortOrder)
     {
-        var index = _searches.FindIndex(item => item.Id == id);
-        if (index < 0 || _searches[index].IsSystem) return;
-        var search = _searches[index];
+        await MoveSearchToIndexAsync(id, parentId, sortOrder ?? _searches.Count);
+    }
+
+    private async Task MoveSearchToIndexAsync(Guid sourceId, Guid? parentId, int insertionIndex)
+    {
+        var source = _searches.FirstOrDefault(item => item.Id == sourceId);
+        if (source is null || source.IsSystem || parentId == sourceId ||
+            (parentId is { } parent && _searches.Any(item => item.Id == parent && IsDescendant(item, sourceId)))) return;
+        var oldSiblings = _searches.Where(item => item.ParentId == source.ParentId && item.Id != sourceId)
+            .OrderBy(item => item.SortOrder).ToList();
+        var newSiblings = parentId == source.ParentId ? oldSiblings : _searches
+            .Where(item => item.ParentId == parentId && item.Id != sourceId).OrderBy(item => item.SortOrder).ToList();
+        newSiblings.Insert(Math.Clamp(insertionIndex, 0, newSiblings.Count), source with { ParentId = parentId });
         try
         {
-            var updated = search with { ParentId = parentId, SortOrder = sortOrder ?? _searches.Count };
-            await _workspaceRepository.SaveSearchAsync(updated, CancellationToken.None);
-            _searches[index] = updated;
+            foreach (var siblings in parentId == source.ParentId ? new[] { newSiblings } : new[] { oldSiblings, newSiblings })
+            {
+                for (var position = 0; position < siblings.Count; position++)
+                {
+                    var updated = siblings[position] with { SortOrder = position };
+                    await _workspaceRepository.SaveSearchAsync(updated, CancellationToken.None);
+                    _searches[_searches.FindIndex(item => item.Id == updated.Id)] = updated;
+                }
+            }
             RebuildSearchNavItems();
-            StatusText.Text = $"Перемещён поиск «{search.Name}»";
+            StatusText.Text = $"Перемещён поиск «{source.Name}»";
         }
         catch (Exception exception)
         {
+            await LoadWorkspaceNavAsync();
             await ShowMessageAsync("Не удалось переместить поиск", exception.Message);
         }
     }
@@ -213,32 +282,18 @@ public sealed partial class MainPage
             .OrderBy(item => item.SortOrder).ToList();
         var targetIndex = siblings.FindIndex(item => item.Id == target.Id);
         if (targetIndex < 0) return;
-        siblings.Insert(targetIndex + (before ? 0 : 1), source with { ParentId = target.ParentId });
-        try
-        {
-            for (var position = 0; position < siblings.Count; position++)
-            {
-                var updated = siblings[position] with { SortOrder = position };
-                await _workspaceRepository.SaveSearchAsync(updated, CancellationToken.None);
-                _searches[_searches.FindIndex(item => item.Id == updated.Id)] = updated;
-            }
-            RebuildSearchNavItems();
-        }
-        catch (Exception exception)
-        {
-            await LoadWorkspaceNavAsync();
-            await ShowMessageAsync("Не удалось переместить поиск", exception.Message);
-        }
+        await MoveSearchToIndexAsync(sourceId, target.ParentId, targetIndex + (before ? 0 : 1));
     }
 
     private async Task ChooseSearchParentAsync(SavedSearchRecord search)
     {
         var choices = _searches.Where(item => item.Id != search.Id && !IsDescendant(item, search.Id)).ToList();
-        var box = new ComboBox { Header = "Родитель", ItemsSource = choices.Select(item => item.Name).ToArray() };
+        var box = new ComboBox { Header = "Родитель", ItemsSource = Enumerable.Repeat("Верхний уровень", 1)
+            .Concat(choices.Select(item => item.Name)).ToArray(), SelectedIndex = 0 };
         var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Переместить поиск", Content = box,
             PrimaryButtonText = "Переместить", CloseButtonText = "Отмена" };
         if (await dialog.ShowAsync() == ContentDialogResult.Primary && box.SelectedIndex >= 0)
-            await MoveSearchAsync(search.Id, choices[box.SelectedIndex].Id, null);
+            await MoveSearchAsync(search.Id, box.SelectedIndex == 0 ? null : choices[box.SelectedIndex - 1].Id, null);
     }
 
     private async Task DeleteSearchAsync(SavedSearchRecord search)

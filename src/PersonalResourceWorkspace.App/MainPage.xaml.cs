@@ -1367,7 +1367,7 @@ public sealed partial class MainPage : Page
         foreach (var search in _searches)
         {
             if (_searchNavItems.TryGetValue(search.Id, out var item))
-                item.Content = CreateNavigationContent(search.Name,
+                item.Content = CreateSearchDropContent(search.Name,
                     _resources.Count(resource => SystemTags.Matches(resource.TagIds, search.RequiredTagIds, [])));
         }
     }
