@@ -1,6 +1,6 @@
 # ADR 0003: Portable data directory and database-backed settings
 
-- Status: Accepted as target specification; implementation pending
+- Status: Accepted and implemented
 - Date: 2026-10-14
 - Supersedes: the storage-location decisions in ADR 0001 and ADR 0002
 
@@ -22,4 +22,4 @@ Changing the data root copies a consistent database snapshot and all app-owned c
 
 Portable operation requires write access to the selected data root and, when changing the saved location, to the directory containing `portable-config.json`. SQLite connection creation, visual storage, migrations, and startup must use one resolved root. Tests must cover source precedence, relative paths, legacy migration, preference migration, successful relocation, conflicts, and rollback on failure.
 
-ADR 0001 still governs unpackaged WinUI deployment. ADR 0002 still governs SQLite integrity and filesystem assets, except for its former packaged/local-profile storage location. Current implementation documentation may continue to describe `%LOCALAPPDATA%` until this decision is implemented and verified.
+ADR 0001 still governs unpackaged WinUI deployment. ADR 0002 still governs SQLite integrity and filesystem assets, except for its former packaged/local-profile storage location. The existing v0.1.1 release predates this decision; current source builds use the portable location.

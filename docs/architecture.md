@@ -13,6 +13,6 @@
 | `src/PersonalResourceWorkspace.Windows` | Windows shell, clipboard, activation, visuals |
 | `tests` | Unit and isolated SQLite integration tests |
 
-Локальная база данных хранится в `%LOCALAPPDATA%\PersonalResourceWorkspace\Data\workspace.db`. Пользовательские изображения — в `Data\Visuals\user`, автоматически полученные превью — в `Data\Visuals\cache`. Миграции БД выполняются транзакционно. / The local database is stored at `%LOCALAPPDATA%\PersonalResourceWorkspace\Data\workspace.db`. User images live in `Data\Visuals\user`; generated previews are cached in `Data\Visuals\cache`. Database migrations are transactional.
+По умолчанию данные находятся в `content` рядом с исполняемым файлом: БД — `Data\workspace.db`, пользовательские изображения — `Data\Visuals\user`, автоматически полученные превью — `Data\Visuals\cache`. Все пользовательские настройки, кроме пути к каталогу данных, хранятся в таблице `Settings` БД. Исторический каталог `%LOCALAPPDATA%\PersonalResourceWorkspace` копируется при первом запуске с пустым portable-каталогом. / By default, app data lives in `content` beside the executable. The database is `Data\workspace.db`; user images and generated previews are under `Data\Visuals`. User preferences live in SQLite. A legacy profile is copied on first launch into an empty portable data root.
 
-Подробнее / Further reading: [project specification](../PROJECT.md), [deployment decision](adr/0001-unpackaged-deployment.md), [storage decision](adr/0002-sqlite-and-filesystem-storage.md), [architecture review](../architecture-review.md).
+Подробнее / Further reading: [project specification](../PROJECT.md), [portable storage decision](adr/0003-portable-data-and-settings.md), [architecture review](../architecture-review.md).

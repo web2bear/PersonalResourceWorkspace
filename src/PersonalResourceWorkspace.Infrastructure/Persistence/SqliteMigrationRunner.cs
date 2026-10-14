@@ -5,13 +5,14 @@ using System.Globalization;
 
 namespace PersonalResourceWorkspace.Infrastructure.Persistence;
 
-internal sealed class SqliteMigrationRunner(ISqliteConnectionFactory connectionFactory) : IApplicationInitializer
+internal sealed class SqliteMigrationRunner(ISqliteConnectionFactory connectionFactory, IAppDataPathProvider pathProvider) : IApplicationInitializer
 {
     private const int FoundationMigrationVersion = 1;
     private const int CollectionsMigrationVersion = 2;
     private const int TrashCollectionMigrationVersion = 3;
     private const int ResourceVisualsMigrationVersion = 4;
     private const int CollectionVisualsMigrationVersion = 5;
+    private const int SettingsMigrationVersion = 6;
 
     private static readonly (string Name, string Glyph, string Color, int SortOrder, bool IsDefault)[] DefaultCollections =
     [
@@ -69,6 +70,23 @@ internal sealed class SqliteMigrationRunner(ISqliteConnectionFactory connectionF
                 }
 
                 await RecordMigrationAsync(connection, transaction, CollectionVisualsMigrationVersion, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!await IsAppliedAsync(connection, transaction, SettingsMigrationVersion, cancellationToken).ConfigureAwait(false))
+            {
+                await using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "CREATE TABLE IF NOT EXISTS Settings (Key TEXT NOT NULL PRIMARY KEY, Value TEXT NOT NULL);";
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                var legacyView = Path.Combine(pathProvider.GetLocalDataRoot(), "Settings", "collection-view.txt");
+                if (File.Exists(legacyView))
+                {
+                    var value = await File.ReadAllTextAsync(legacyView, cancellationToken).ConfigureAwait(false);
+                    command.CommandText = "INSERT OR IGNORE INTO Settings(Key, Value) VALUES ('collection-view', $value);";
+                    command.Parameters.AddWithValue("$value", string.Equals(value.Trim(), "list", StringComparison.OrdinalIgnoreCase) ? "list" : "grid");
+                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+                await RecordMigrationAsync(connection, transaction, SettingsMigrationVersion, cancellationToken).ConfigureAwait(false);
             }
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

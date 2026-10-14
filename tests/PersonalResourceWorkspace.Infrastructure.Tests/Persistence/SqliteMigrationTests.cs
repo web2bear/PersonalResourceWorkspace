@@ -12,6 +12,20 @@ public sealed class SqliteMigrationTests : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
+    [Fact]
+    public async Task LegacyViewPreferenceMovesIntoDatabase()
+    {
+        var settings = Path.Combine(_temporaryRoot, "Settings");
+        Directory.CreateDirectory(settings);
+        File.WriteAllText(Path.Combine(settings, "collection-view.txt"), "list");
+        await using var provider = CreateServices();
+        await provider.GetRequiredService<IApplicationInitializer>().InitializeAsync(CancellationToken.None);
+        var preferences = provider.GetRequiredService<IUserPreferenceStore>();
+        Assert.Equal("list", await preferences.GetAsync("collection-view", CancellationToken.None));
+        await preferences.SetAsync("sort-mode", "modified", CancellationToken.None);
+        Assert.Equal("modified", await preferences.GetAsync("sort-mode", CancellationToken.None));
+    }
+
     public Task DisposeAsync()
     {
         SqliteConnection.ClearAllPools();

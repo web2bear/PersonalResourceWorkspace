@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using PersonalResourceWorkspace.Application.Abstractions;
 using PersonalResourceWorkspace.Application.Resources;
 using PersonalResourceWorkspace.Infrastructure;
@@ -43,6 +44,7 @@ public partial class App : Microsoft.UI.Xaml.Application
     {
         try
         {
+            await _services.GetRequiredService<IPortableDataDirectory>().InitializeAsync(CancellationToken.None);
             foreach (var initializer in _services.GetServices<IApplicationInitializer>())
             {
                 await initializer.InitializeAsync(CancellationToken.None);
@@ -54,7 +56,14 @@ public partial class App : Microsoft.UI.Xaml.Application
         catch (Exception exception)
         {
             LogInitializationFailure(_services.GetRequiredService<ILogger<App>>(), exception);
-            Exit();
+            _window = new Window { Title = "Ошибка каталога данных" };
+            _window.Content = new TextBlock
+            {
+                Text = $"Не удалось открыть данные приложения:\n{exception.Message}\n\nПроверьте --data-dir, PERSONAL_RESOURCE_WORKSPACE_DATA_DIR или portable-config.json.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(24),
+            };
+            _window.Activate();
         }
     }
 

@@ -21,7 +21,7 @@ dotnet test PersonalResourceWorkspace.slnx -c Debug --no-build
 dotnet run --project src/PersonalResourceWorkspace.App/PersonalResourceWorkspace.App.csproj -c Debug -r win-x64
 ```
 
-Данные приложения находятся в `%LOCALAPPDATA%\PersonalResourceWorkspace`; при повторном запуске каталог сохраняется. / App data lives in `%LOCALAPPDATA%\PersonalResourceWorkspace` and persists across launches.
+Данные по умолчанию находятся в `content` рядом с запускаемым `.exe`. Путь можно задать через `--data-dir <path>`, переменную `PERSONAL_RESOURCE_WORKSPACE_DATA_DIR` или поле `dataDirectory` в `portable-config.json` рядом с `.exe`; приоритет именно в этом порядке. Относительные пути считаются от каталога `.exe`. Формой «Настройки» можно скопировать рабочее пространство в другой пустой каталог; для перехода на него перезапустите приложение. Прежние данные сохраняются. / By default, data lives in `content` beside the executable. The CLI argument, environment variable, and JSON config override it in that order. Settings can copy the workspace to another empty directory; restart to use it.
 
 ## Выпуск версий / Releases
 
