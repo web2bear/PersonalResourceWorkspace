@@ -9,6 +9,7 @@ public sealed class ResourceViewModePreferenceTests
     [InlineData("")]
     [InlineData("unexpected")]
     [InlineData("grid")]
+    [InlineData("grid-medium")]
     public void ParseUsesGridAsSafeDefault(string? value)
     {
         Assert.Equal(ResourceViewMode.Grid, ResourceViewModePreference.Parse(value));
@@ -23,10 +24,21 @@ public sealed class ResourceViewModePreferenceTests
     }
 
     [Theory]
-    [InlineData(ResourceViewMode.Grid, "grid")]
+    [InlineData(ResourceViewMode.Grid, "grid-medium")]
+    [InlineData(ResourceViewMode.GridSmall, "grid-small")]
+    [InlineData(ResourceViewMode.GridLarge, "grid-large")]
     [InlineData(ResourceViewMode.List, "list")]
     public void SerializeUsesStableLocalValues(ResourceViewMode mode, string expected)
     {
         Assert.Equal(expected, ResourceViewModePreference.Serialize(mode));
+    }
+
+    [Theory]
+    [InlineData("grid-small", ResourceViewMode.GridSmall)]
+    [InlineData("GRID-LARGE", ResourceViewMode.GridLarge)]
+    [InlineData("grid-medium", ResourceViewMode.Grid)]
+    public void ParseRestoresGridSizes(string value, ResourceViewMode expected)
+    {
+        Assert.Equal(expected, ResourceViewModePreference.Parse(value));
     }
 }

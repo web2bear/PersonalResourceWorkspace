@@ -104,14 +104,12 @@
                             <MenuFlyout>
                                 <ToggleMenuFlyoutItem x:Name="SortByTitleItem" Click="SortByTitle_Click" IsChecked="True" Text="По названию" />
                                 <ToggleMenuFlyoutItem x:Name="SortByModifiedItem" Click="SortByModified_Click" Text="По дате изменения" />
+                                <ToggleMenuFlyoutItem x:Name="SortManuallyItem" Click="SortManually_Click" Text="Вручную" />
                             </MenuFlyout>
                         </AppBarButton.Flyout>
                     </AppBarButton>
                     <AppBarSeparator />
-                    <AppBarToggleButton x:Name="GridViewToggle" AutomationProperties.Name="Сетка" Click="GridViewToggle_Click" Icon="View" IsChecked="True" Label="Сетка" />
-                    <AppBarToggleButton x:Name="ListViewToggle" AutomationProperties.Name="Список" Click="ListViewToggle_Click" Label="Список">
-                        <AppBarToggleButton.Icon><FontIcon Glyph="&#xE8EF;" /></AppBarToggleButton.Icon>
-                    </AppBarToggleButton>
+                    <AppBarButton x:Name="ViewModeButton" AutomationProperties.Name="Вид ресурсов" Icon="View" Label="Вид ресурсов" />
                 </CommandBar>
 
                 <VisualStateManager.VisualStateGroups>
@@ -150,6 +148,11 @@
                 AutomationProperties.Name="Ресурсы, сетка"
                 CanDragItems="True"
                 DragItemsStarting="Resources_DragItemsStarting"
+                DragItemsCompleted="Resources_DragItemsCompleted"
+                AllowDrop="True"
+                DragOver="Resources_DragOver"
+                DragLeave="Resources_DragLeave"
+                Drop="Resources_Drop"
                 CanReorderItems="False"
                 DoubleTapped="Resources_DoubleTapped"
                 IsItemClickEnabled="True"
@@ -217,6 +220,11 @@
                 x:Name="ResourcesList"
                 CanDragItems="True"
                 DragItemsStarting="Resources_DragItemsStarting"
+                DragItemsCompleted="Resources_DragItemsCompleted"
+                AllowDrop="True"
+                DragOver="Resources_DragOver"
+                DragLeave="Resources_DragLeave"
+                Drop="Resources_Drop"
                 Grid.Row="1"
                 AutomationProperties.Name="Ресурсы, список"
                 DoubleTapped="Resources_DoubleTapped"
@@ -265,6 +273,10 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+
+            <Canvas x:Name="ResourceDropOverlay" Grid.Row="1" IsHitTestVisible="False">
+                <Border x:Name="ResourceDropMarker" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="2" Visibility="Collapsed" />
+            </Canvas>
 
             <Grid Grid.Row="2" Margin="4,8,0,0">
                 <TextBlock x:Name="StatusText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

@@ -54,6 +54,14 @@ internal sealed class SqliteWorkspaceInitializer(
                     TagId TEXT NOT NULL REFERENCES Tags(Id) ON DELETE RESTRICT,
                     PRIMARY KEY(SearchId, TagId)
                 );
+                CREATE TABLE IF NOT EXISTS SearchResourceRanks (
+                    SearchId TEXT NOT NULL REFERENCES SavedSearches(Id) ON DELETE CASCADE,
+                    ResourceId TEXT NOT NULL REFERENCES Resources(Id) ON DELETE CASCADE,
+                    Rank INTEGER NOT NULL,
+                    PRIMARY KEY(SearchId, ResourceId)
+                );
+                CREATE INDEX IF NOT EXISTS IX_SearchResourceRanks_Search_Rank
+                    ON SearchResourceRanks(SearchId, Rank);
                 CREATE TABLE IF NOT EXISTS Settings (Key TEXT NOT NULL PRIMARY KEY, Value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS WorkspaceSchema (Version INTEGER NOT NULL PRIMARY KEY);
                 """;

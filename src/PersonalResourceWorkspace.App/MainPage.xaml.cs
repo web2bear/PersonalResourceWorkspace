@@ -18,6 +18,8 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.System;
 using Windows.UI;
+using Microsoft.Extensions.Logging;
+using PersonalResourceWorkspace.Application.Diagnostics;
 
 namespace PersonalResourceWorkspace.App;
 
@@ -38,13 +40,23 @@ public sealed partial class MainPage : Page
     private readonly IUserPreferenceStore _userPreferences;
     private readonly IPortableDataDirectory _dataDirectory;
     private readonly Window _window;
+    private readonly ILogger<MainPage> _logger;
     private ResourceViewMode _viewMode = ResourceViewMode.Grid;
-    private int _cardSize = 1;
+    private readonly List<(ResourceViewMode Mode, ToggleMenuFlyoutItem Item)> _viewModeMenuItems = [];
+    private static readonly (ResourceViewMode Mode, string Label, int CardSize)[] ViewModes =
+    [
+        (ResourceViewMode.GridSmall, "Сетка — маленькая", 0),
+        (ResourceViewMode.Grid, "Сетка — средняя", 1),
+        (ResourceViewMode.GridLarge, "Сетка — большая", 2),
+        (ResourceViewMode.List, "Список", 1),
+    ];
+    private int _cardSize => ViewModes.First(option => option.Mode == _viewMode).CardSize;
     private int _maximumGridColumns = 8;
     private bool _showCardTitle = true;
     private bool _showCardDescription;
     private bool _showCardDeleteButton;
     private ResourceSortMode _sortMode = ResourceSortMode.Title;
+    private IReadOnlyDictionary<Guid, long> _activeResourceRanks = new Dictionary<Guid, long>();
     private WorkspaceResource? _selectedResource;
     private bool _synchronizingSelection;
     private string? _lastDropSignature;
@@ -60,9 +72,11 @@ public sealed partial class MainPage : Page
         IResourceViewPreferenceStore viewPreferenceStore,
         IUserPreferenceStore userPreferences,
         IPortableDataDirectory dataDirectory,
-        IWorkspaceRepository workspaceRepository)
+        IWorkspaceRepository workspaceRepository,
+        ILogger<MainPage> logger)
     {
         _window = window;
+        _logger = logger;
         _resourceLaunchService = resourceLaunchService;
         _clipboardService = clipboardService;
         _resourceVisualService = resourceVisualService;
@@ -71,6 +85,17 @@ public sealed partial class MainPage : Page
         _dataDirectory = dataDirectory;
         _workspaceRepository = workspaceRepository;
         InitializeComponent();
+        var viewMenu = new MenuFlyout();
+        foreach (var option in ViewModes)
+        {
+            var item = new ToggleMenuFlyoutItem { Text = option.Label };
+            var mode = option.Mode;
+            item.Click += async (_, _) => await SetViewModeAsync(mode, persist: true);
+            viewMenu.Items.Add(item);
+            _viewModeMenuItems.Add((mode, item));
+        }
+        ViewModeButton.Flyout = viewMenu;
+        UpdateViewModeMenu();
         if (ShellNavigation.SettingsItem is NavigationViewItem settingsItem)
         {
             settingsItem.Content = "Настройки";
@@ -86,8 +111,8 @@ public sealed partial class MainPage : Page
 
     private async void MainPage_Loaded(object sender, RoutedEventArgs e)
     {
-        await RestoreViewModeAsync();
         await RestoreGridPreferencesAsync();
+        await RestoreViewModeAsync();
         await RestoreSortModeAsync();
         await LoadWorkspaceNavAsync();
         await LoadResourcesAsync();
@@ -96,6 +121,9 @@ public sealed partial class MainPage : Page
 
     private static SolidColorBrush Brush(byte red, byte green, byte blue) =>
         new(Color.FromArgb(255, red, green, blue));
+
+    private void LogOperationFailure(Exception exception, [CallerMemberName] string operation = "") =>
+        DiagnosticLog.OperationFailed(_logger, operation, null, exception);
 
     private static Brush ThemeBrush(string resourceKey, Brush fallback) =>
         Microsoft.UI.Xaml.Application.Current.Resources.TryGetValue(resourceKey, out var resource) && resource is Brush brush
@@ -119,10 +147,12 @@ public sealed partial class MainPage : Page
         {
             _activeSearchId = search.Id;
             PageTitle.Text = search.Name;
+            await LoadResourceRanksAsync(search.Id);
         }
         else if (Equals(item.Tag, AllSearchTag))
         {
             _activeSearchId = null;
+            _activeResourceRanks = new Dictionary<Guid, long>();
             PageTitle.Text = "Все ресурсы";
         }
         else return;
@@ -131,6 +161,7 @@ public sealed partial class MainPage : Page
         TagFilterBox.Text = string.Empty;
         UpdateTagFilterChips();
         UpdateCreateAvailability();
+        SortManuallyItem.IsEnabled = _activeSearchId.HasValue;
         ApplyFilter();
     }
 
@@ -166,6 +197,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             StatusText.Text = $"Не удалось добавить ресурс: {exception.Message}";
         }
     }
@@ -177,8 +209,9 @@ public sealed partial class MainPage : Page
             var snapshot = await _clipboardService.ReadAsync(CancellationToken.None);
             return ResourceDraftFactory.TryCreate(snapshot);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogOperationFailure(exception);
             return null;
         }
     }
@@ -287,23 +320,37 @@ public sealed partial class MainPage : Page
     }
 
     private WorkspaceResource? GetVisibleSelectedResource() =>
-        (_viewMode == ResourceViewMode.Grid ? ResourcesGrid.SelectedItem : ResourcesList.SelectedItem)
+        (_viewMode != ResourceViewMode.List ? ResourcesGrid.SelectedItem : ResourcesList.SelectedItem)
         as WorkspaceResource;
 
-    private async void GridViewToggle_Click(object sender, RoutedEventArgs e) =>
-        await SetViewModeAsync(ResourceViewMode.Grid, persist: true);
-
-    private async void ListViewToggle_Click(object sender, RoutedEventArgs e) =>
-        await SetViewModeAsync(ResourceViewMode.List, persist: true);
+    private void UpdateViewModeMenu()
+    {
+        foreach (var (mode, item) in _viewModeMenuItems) item.IsChecked = mode == _viewMode;
+        ViewModeButton.Label = ViewModes.First(option => option.Mode == _viewMode).Label;
+    }
 
     private async Task RestoreViewModeAsync()
     {
         try
         {
-            await SetViewModeAsync(await _viewPreferenceStore.LoadAsync(CancellationToken.None), persist: false);
+            var storedMode = await _userPreferences.GetAsync("resource-view", CancellationToken.None);
+            var mode = await _viewPreferenceStore.LoadAsync(CancellationToken.None);
+            if (string.Equals(storedMode, ResourceViewModePreference.GridValue, StringComparison.OrdinalIgnoreCase))
+            {
+                var legacySize = await _userPreferences.GetAsync("grid-card-size", CancellationToken.None);
+                mode = legacySize switch
+                {
+                    "0" => ResourceViewMode.GridSmall,
+                    "2" => ResourceViewMode.GridLarge,
+                    _ => ResourceViewMode.Grid,
+                };
+                await SetViewModeAsync(mode, persist: true);
+            }
+            else await SetViewModeAsync(mode, persist: false);
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             await SetViewModeAsync(ResourceViewMode.Grid, persist: false);
             StatusText.Text = $"Не удалось восстановить вид: {exception.Message}";
         }
@@ -312,10 +359,10 @@ public sealed partial class MainPage : Page
     private async Task SetViewModeAsync(ResourceViewMode mode, bool persist)
     {
         _viewMode = mode;
-        GridViewToggle.IsChecked = mode == ResourceViewMode.Grid;
-        ListViewToggle.IsChecked = mode == ResourceViewMode.List;
-        ResourcesGrid.Visibility = mode == ResourceViewMode.Grid ? Visibility.Visible : Visibility.Collapsed;
+        UpdateViewModeMenu();
+        ResourcesGrid.Visibility = mode != ResourceViewMode.List ? Visibility.Visible : Visibility.Collapsed;
         ResourcesList.Visibility = mode == ResourceViewMode.List ? Visibility.Visible : Visibility.Collapsed;
+        UpdateResponsiveLayout(ActualWidth);
 
         _synchronizingSelection = true;
         ResourcesGrid.SelectedItem = _selectedResource;
@@ -330,6 +377,7 @@ public sealed partial class MainPage : Page
             }
             catch (Exception exception)
             {
+                LogOperationFailure(exception);
                 StatusText.Text = $"Не удалось сохранить вид: {exception.Message}";
             }
         }
@@ -340,6 +388,7 @@ public sealed partial class MainPage : Page
         _sortMode = ResourceSortMode.Title;
         SortByTitleItem.IsChecked = true;
         SortByModifiedItem.IsChecked = false;
+        SortManuallyItem.IsChecked = false;
         ApplyFilter();
         await SaveSortModeAsync();
     }
@@ -349,27 +398,66 @@ public sealed partial class MainPage : Page
         _sortMode = ResourceSortMode.Modified;
         SortByTitleItem.IsChecked = false;
         SortByModifiedItem.IsChecked = true;
+        SortManuallyItem.IsChecked = false;
         ApplyFilter();
         await SaveSortModeAsync();
+    }
+
+    private async void SortManually_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activeSearchId is not { } searchId) return;
+        await LoadResourceRanksAsync(searchId);
+        _sortMode = ResourceSortMode.Manual;
+        SortByTitleItem.IsChecked = false;
+        SortByModifiedItem.IsChecked = false;
+        SortManuallyItem.IsChecked = true;
+        ApplyFilter();
+        await SaveSortModeAsync();
+    }
+
+    private async Task LoadResourceRanksAsync(Guid searchId)
+    {
+        try { _activeResourceRanks = await _workspaceRepository.GetResourceRanksAsync(searchId, CancellationToken.None); }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось загрузить порядок карточек: {exception.Message}";
+            _activeResourceRanks = new Dictionary<Guid, long>();
+        }
     }
 
     private async Task RestoreSortModeAsync()
     {
         try
         {
-            _sortMode = string.Equals(await _userPreferences.GetAsync("sort-mode", CancellationToken.None), "modified", StringComparison.OrdinalIgnoreCase)
-                ? ResourceSortMode.Modified : ResourceSortMode.Title;
+            var savedMode = await _userPreferences.GetAsync("sort-mode", CancellationToken.None);
+            _sortMode = savedMode switch
+            {
+                "modified" => ResourceSortMode.Modified,
+                "manual" => ResourceSortMode.Manual,
+                _ => ResourceSortMode.Title,
+            };
             SortByTitleItem.IsChecked = _sortMode == ResourceSortMode.Title;
             SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
+            SortManuallyItem.IsChecked = _sortMode == ResourceSortMode.Manual;
+            SortManuallyItem.IsEnabled = _activeSearchId.HasValue;
             ApplyFilter();
         }
-        catch (Exception exception) { StatusText.Text = $"Не удалось восстановить сортировку: {exception.Message}"; }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось восстановить сортировку: {exception.Message}";
+        }
     }
 
     private async Task SaveSortModeAsync()
     {
-        try { await _userPreferences.SetAsync("sort-mode", _sortMode == ResourceSortMode.Modified ? "modified" : "title", CancellationToken.None); }
-        catch (Exception exception) { StatusText.Text = $"Не удалось сохранить сортировку: {exception.Message}"; }
+        try { await _userPreferences.SetAsync("sort-mode", _sortMode switch { ResourceSortMode.Modified => "modified", ResourceSortMode.Manual => "manual", _ => "title" }, CancellationToken.None); }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось сохранить сортировку: {exception.Message}";
+        }
     }
 
     private async Task ShowSettingsAsync()
@@ -386,28 +474,38 @@ public sealed partial class MainPage : Page
             if (selected is not null) pathBox.Text = selected.Path;
         };
         var viewBox = new ComboBox { Header = "Вид ресурсов" };
-        viewBox.Items.Add("Сетка"); viewBox.Items.Add("Список");
-        viewBox.SelectedIndex = _viewMode == ResourceViewMode.List ? 1 : 0;
+        foreach (var option in ViewModes) viewBox.Items.Add(option.Label);
+        viewBox.SelectedIndex = Array.FindIndex(ViewModes, option => option.Mode == _viewMode);
         var sortBox = new ComboBox { Header = "Сортировка" };
-        sortBox.Items.Add("По названию"); sortBox.Items.Add("По дате изменения");
-        sortBox.SelectedIndex = _sortMode == ResourceSortMode.Modified ? 1 : 0;
-        var cardSizeBox = new ComboBox { Header = "Размер карточек" };
-        cardSizeBox.Items.Add("Маленький"); cardSizeBox.Items.Add("Средний"); cardSizeBox.Items.Add("Большой");
-        cardSizeBox.SelectedIndex = _cardSize;
+        sortBox.Items.Add("По названию"); sortBox.Items.Add("По дате изменения"); sortBox.Items.Add("Вручную (в сохранённом поиске)");
+        sortBox.SelectedIndex = (int)_sortMode;
         var columnsBox = new ComboBox { Header = "Столбцов не более" };
         for (var columns = 2; columns <= 8; columns++) columnsBox.Items.Add(columns);
         columnsBox.SelectedIndex = _maximumGridColumns - 2;
         var titleSwitch = new ToggleSwitch { Header = "Показывать название карточки", IsOn = _showCardTitle };
         var descriptionSwitch = new ToggleSwitch { Header = "Показывать дополнительный текст", IsOn = _showCardDescription };
         var deleteSwitch = new ToggleSwitch { Header = "Показывать кнопку удаления", IsOn = _showCardDeleteButton };
+        var logLevelBox = new ComboBox { Header = "Уровень журнала приложения", ItemsSource = Enum.GetValues<LogLevel>() };
+        logLevelBox.SelectedItem = Enum.TryParse<LogLevel>(await _userPreferences.GetAsync("logging-level", CancellationToken.None), out var generalLevel) ? generalLevel : LogLevel.Information;
+        var previewLogLevelBox = new ComboBox { Header = "Уровень журнала превью", ItemsSource = Enum.GetValues<LogLevel>() };
+        previewLogLevelBox.SelectedItem = Enum.TryParse<LogLevel>(await _userPreferences.GetAsync("logging-preview-level", CancellationToken.None), out var previewLevel) ? previewLevel : LogLevel.Debug;
         var stack = new StackPanel { Spacing = 12, MinWidth = 400 };
         stack.Children.Add(rootLabel); stack.Children.Add(pathBox); stack.Children.Add(browse);
+        stack.Children.Add(new TextBlock
+        {
+            Text = $"Файл базы данных: {Path.Combine(_dataDirectory.GetLocalDataRoot(), "Data", "workspace.db")}",
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        });
         if (_dataDirectory.IsOverridden)
             stack.Children.Add(new TextBlock { Text = "Путь задан извне. Измените параметр запуска или переменную окружения, чтобы выбрать другой каталог.", TextWrapping = TextWrapping.Wrap });
         stack.Children.Add(viewBox); stack.Children.Add(sortBox);
         stack.Children.Add(new TextBlock { Text = "Сетка", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        stack.Children.Add(cardSizeBox); stack.Children.Add(columnsBox);
+        stack.Children.Add(columnsBox);
         stack.Children.Add(titleSwitch); stack.Children.Add(descriptionSwitch); stack.Children.Add(deleteSwitch);
+        stack.Children.Add(new TextBlock { Text = "Диагностика", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        stack.Children.Add(logLevelBox); stack.Children.Add(previewLogLevelBox);
+        stack.Children.Add(new TextBlock { Text = $"Журнал: {Path.Combine(_dataDirectory.GetLocalDataRoot(), "Logs")}\nИзменения уровня применяются после перезапуска.", TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
         var dialog = new ContentDialog
         {
             Title = "Настройки", Content = new ScrollViewer { Content = stack, MaxHeight = 540 }, PrimaryButtonText = "Сохранить", CloseButtonText = "Отмена",
@@ -418,23 +516,29 @@ public sealed partial class MainPage : Page
         {
             var requestedRoot = Path.GetFullPath(Path.IsPathFullyQualified(pathBox.Text) ? pathBox.Text : Path.Combine(AppContext.BaseDirectory, pathBox.Text));
             var changedRoot = !string.Equals(requestedRoot, _dataDirectory.GetLocalDataRoot(), StringComparison.OrdinalIgnoreCase);
-            await SetViewModeAsync(viewBox.SelectedIndex == 1 ? ResourceViewMode.List : ResourceViewMode.Grid, persist: true);
-            _sortMode = sortBox.SelectedIndex == 1 ? ResourceSortMode.Modified : ResourceSortMode.Title;
+            await SetViewModeAsync(ViewModes[viewBox.SelectedIndex].Mode, persist: true);
+            _sortMode = (ResourceSortMode)sortBox.SelectedIndex;
             SortByTitleItem.IsChecked = _sortMode == ResourceSortMode.Title;
             SortByModifiedItem.IsChecked = _sortMode == ResourceSortMode.Modified;
+            SortManuallyItem.IsChecked = _sortMode == ResourceSortMode.Manual;
             ApplyFilter();
             await SaveSortModeAsync();
-            _cardSize = cardSizeBox.SelectedIndex;
             _maximumGridColumns = columnsBox.SelectedIndex + 2;
             _showCardTitle = titleSwitch.IsOn;
             _showCardDescription = descriptionSwitch.IsOn;
             _showCardDeleteButton = deleteSwitch.IsOn;
             UpdateResponsiveLayout(ActualWidth);
             await SaveGridPreferencesAsync();
+            await _userPreferences.SetAsync("logging-level", logLevelBox.SelectedItem.ToString()!, CancellationToken.None);
+            await _userPreferences.SetAsync("logging-preview-level", previewLogLevelBox.SelectedItem.ToString()!, CancellationToken.None);
             if (changedRoot) await _dataDirectory.RelocateAsync(pathBox.Text, CancellationToken.None);
             StatusText.Text = changedRoot ? "Данные скопированы. Перезапустите приложение для перехода в новый каталог." : "Настройки сохранены.";
         }
-        catch (Exception exception) { StatusText.Text = $"Не удалось сохранить настройки: {exception.Message}"; }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось сохранить настройки: {exception.Message}";
+        }
     }
 
     private void MainPage_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
@@ -443,21 +547,22 @@ public sealed partial class MainPage : Page
     {
         try
         {
-            var size = await _userPreferences.GetAsync("grid-card-size", CancellationToken.None);
             var columns = await _userPreferences.GetAsync("grid-max-columns", CancellationToken.None);
-            _cardSize = int.TryParse(size, out var parsedSize) ? Math.Clamp(parsedSize, 0, 2) : 1;
             _maximumGridColumns = int.TryParse(columns, out var parsedColumns) ? Math.Clamp(parsedColumns, 2, 8) : 8;
             _showCardTitle = await _userPreferences.GetAsync("grid-show-title", CancellationToken.None) != "false";
             _showCardDescription = await _userPreferences.GetAsync("grid-show-description", CancellationToken.None) == "true";
             _showCardDeleteButton = await _userPreferences.GetAsync("grid-show-delete", CancellationToken.None) == "true";
             UpdateResponsiveLayout(ActualWidth);
         }
-        catch (Exception exception) { StatusText.Text = $"Не удалось восстановить настройки сетки: {exception.Message}"; }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось восстановить настройки сетки: {exception.Message}";
+        }
     }
 
     private async Task SaveGridPreferencesAsync()
     {
-        await _userPreferences.SetAsync("grid-card-size", _cardSize.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
         await _userPreferences.SetAsync("grid-max-columns", _maximumGridColumns.ToString(CultureInfo.InvariantCulture), CancellationToken.None);
         await _userPreferences.SetAsync("grid-show-title", _showCardTitle ? "true" : "false", CancellationToken.None);
         await _userPreferences.SetAsync("grid-show-description", _showCardDescription ? "true" : "false", CancellationToken.None);
@@ -573,6 +678,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             StatusText.Text = $"Не удалось добавить: {exception.Message}";
             return false;
         }
@@ -633,7 +739,7 @@ public sealed partial class MainPage : Page
         return false;
     }
 
-    private static async Task<List<WorkspaceResource>> CollectDroppedResourcesAsync(
+    private async Task<List<WorkspaceResource>> CollectDroppedResourcesAsync(
         DataPackageView dataView)
     {
         var added = new List<WorkspaceResource>();
@@ -651,8 +757,9 @@ public sealed partial class MainPage : Page
                 return added;
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            LogOperationFailure(exception);
             // Unpackaged / island payloads often expose CF_HDROP without a pre-populated StorageItems format.
         }
 
@@ -764,7 +871,11 @@ public sealed partial class MainPage : Page
                 sender.Text = string.Empty;
                 RenderEditorTags();
             }
-            catch (Exception exception) { validationText.Text = exception.Message; validationText.Visibility = Visibility.Visible; }
+            catch (Exception exception)
+            {
+                LogOperationFailure(exception);
+                validationText.Text = exception.Message; validationText.Visibility = Visibility.Visible;
+            }
         };
         RenderEditorTags();
 
@@ -949,6 +1060,7 @@ public sealed partial class MainPage : Page
             }
             catch (Exception exception)
             {
+                LogOperationFailure(exception);
                 ShowFallbackPreview($"Не удалось показать визуал: {exception.Message}");
             }
         }
@@ -1097,6 +1209,7 @@ public sealed partial class MainPage : Page
                     }
                     catch (Exception exception)
                     {
+                        LogOperationFailure(exception);
                         args.Cancel = true;
                         validationText.Text = exception.Message;
                         validationText.Visibility = Visibility.Visible;
@@ -1152,6 +1265,7 @@ public sealed partial class MainPage : Page
         try
         {
             var saved = await _workspaceRepository.GetResourcesAsync(CancellationToken.None);
+            DiagnosticLog.ResourcesLoaded(_logger, saved.Count);
             _resources.Clear();
             _resources.AddRange(saved.Select(resource => new WorkspaceResource(
                 resource.Title,
@@ -1168,6 +1282,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            DiagnosticLog.OperationFailed(_logger, "Load resources", null, exception);
             StatusText.Text = $"Не удалось загрузить ресурсы: {exception.Message}";
         }
     }
@@ -1222,13 +1337,15 @@ public sealed partial class MainPage : Page
             }
 
             resource.ApplyVisualResolution(resolution, imageSource);
+            DiagnosticLog.PreviewDisplayed(_logger, resource.Id, imageSource is not null, previousDescriptor != resolution.Descriptor);
             if (previousDescriptor != resolution.Descriptor)
             {
                 await SaveResourceAsync(resource);
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            DiagnosticLog.OperationFailed(_logger, "Load or persist preview", resource.Id, exception);
             resource.ApplyVisualResolution(
                 new ResourceVisualResolution(
                     resource.Visual,
@@ -1245,8 +1362,8 @@ public sealed partial class MainPage : Page
 
     private static async Task<ImageSource> LoadImageSourceAsync(string path, CancellationToken cancellationToken)
     {
-        var file = await StorageFile.GetFileFromPathAsync(path);
-        using var stream = await file.OpenReadAsync();
+        using var fileStream = File.OpenRead(path);
+        using var stream = fileStream.AsRandomAccessStream();
         cancellationToken.ThrowIfCancellationRequested();
         var image = new BitmapImage();
         await image.SetSourceAsync(stream);
@@ -1265,6 +1382,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             var errorDialog = new ContentDialog
             {
                 XamlRoot = XamlRoot,
@@ -1324,7 +1442,10 @@ public sealed partial class MainPage : Page
               resource.Address.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
               resource.Kind.Contains(query, StringComparison.CurrentCultureIgnoreCase)));
 
-        matches = _sortMode == ResourceSortMode.Modified
+        matches = _sortMode == ResourceSortMode.Manual && _activeSearchId.HasValue
+            ? matches.OrderBy(resource => _activeResourceRanks.TryGetValue(resource.Id, out var rank) ? rank : long.MaxValue)
+                .ThenBy(resource => resource.Title, StringComparer.CurrentCultureIgnoreCase)
+            : _sortMode == ResourceSortMode.Modified
             ? matches.OrderByDescending(resource => resource.Modified, StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(resource => resource.Title, StringComparer.CurrentCultureIgnoreCase)
             : matches.OrderBy(resource => resource.Title, StringComparer.CurrentCultureIgnoreCase);
@@ -1427,6 +1548,7 @@ public sealed partial class MainPage : Page
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             StatusText.Text = $"Не удалось удалить ресурс: {exception.Message}";
         }
     }
@@ -1515,6 +1637,7 @@ public sealed partial class MainPage : Page
     {
         Title,
         Modified,
+        Manual,
     }
 }
 

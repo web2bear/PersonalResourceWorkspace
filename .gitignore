@@ -9,6 +9,7 @@
 *.userosscache
 *.sln.docstates
 artifacts/
+UserData/
 
 # Build logs
 [Ll]og/

@@ -12,6 +12,9 @@ using Windows.Storage;
 using Windows.Storage.FileProperties;
 using Windows.Storage.Streams;
 using Windows.Graphics.Imaging;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using PersonalResourceWorkspace.Application.Diagnostics;
 
 namespace PersonalResourceWorkspace.Windows.Visuals;
 
@@ -29,10 +32,12 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
 
     private readonly IAppDataPathProvider _pathProvider;
     private readonly HttpClient _httpClient;
+    private readonly ILogger<WindowsResourceVisualService> _logger;
 
-    public WindowsResourceVisualService(IAppDataPathProvider pathProvider)
+    public WindowsResourceVisualService(IAppDataPathProvider pathProvider, ILogger<WindowsResourceVisualService>? logger = null)
     {
         _pathProvider = pathProvider;
+        _logger = logger ?? NullLogger<WindowsResourceVisualService>.Instance;
         _httpClient = new HttpClient(new HttpClientHandler
         {
             AllowAutoRedirect = true,
@@ -46,6 +51,29 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
     }
 
     public async Task<ResourceVisualResolution> ResolveAsync(
+        ResourceVisualRequest request, bool forceRefresh, CancellationToken cancellationToken)
+    {
+        using var scope = _logger.BeginScope(new Dictionary<string, object> { ["ResourceId"] = request.ResourceId, ["PreviewAttemptId"] = Guid.NewGuid() });
+        var started = Stopwatch.GetTimestamp();
+        DiagnosticLog.PreviewStarted(_logger, request.ResourceId, request.Type.ToString(), request.Descriptor.Mode.ToString(), request.Descriptor.Origin.ToString(), forceRefresh);
+        var result = await ResolveCoreAsync(request, forceRefresh, cancellationToken).ConfigureAwait(false);
+        // A failed refresh must not replace a still-valid preview with a generic icon.
+        var previousPath = GetAbsoluteAssetPath(request.Descriptor.AssetPath);
+        if (forceRefresh && request.Descriptor.Mode == ResourceVisualMode.Auto &&
+            request.Descriptor.Kind == ResourceVisualKind.Image && result.Descriptor.Kind is ResourceVisualKind.TypeFallback or ResourceVisualKind.Icon &&
+            string.Equals(request.Descriptor.SourceFingerprint, CreateFingerprint(request.Type, request.Address, request.Description), StringComparison.Ordinal) &&
+            previousPath is not null && File.Exists(previousPath) && await IsDecodableImageAsync(previousPath, cancellationToken).ConfigureAwait(false))
+        {
+            DiagnosticLog.PreviewFallback(_logger, request.ResourceId, "Refresh produced no image; retaining the last valid cached preview");
+            result = new ResourceVisualResolution(request.Descriptor, previousPath, null, SourceLabel(request.Descriptor.Origin));
+        }
+        else if (result.AbsoluteAssetPath is null && result.PreviewText is null && request.Descriptor.Mode != ResourceVisualMode.TypeFallback)
+            DiagnosticLog.PreviewFallback(_logger, request.ResourceId, "No usable image or generated preview returned");
+        DiagnosticLog.PreviewResolved(_logger, request.ResourceId, result.Descriptor.Kind.ToString(), result.Descriptor.Origin.ToString(), result.AbsoluteAssetPath, (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        return result;
+    }
+
+    private async Task<ResourceVisualResolution> ResolveCoreAsync(
         ResourceVisualRequest request,
         bool forceRefresh,
         CancellationToken cancellationToken)
@@ -68,6 +96,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
 
         var fingerprint = CreateFingerprint(request.Type, request.Address, request.Description);
         var cachedPath = GetAbsoluteAssetPath(request.Descriptor.AssetPath);
+        DiagnosticLog.PreviewCache(_logger, request.ResourceId, cachedPath, cachedPath is not null && File.Exists(cachedPath), string.Equals(request.Descriptor.SourceFingerprint, fingerprint, StringComparison.Ordinal));
         if (!forceRefresh &&
             request.Descriptor.Mode == ResourceVisualMode.Auto &&
             string.Equals(request.Descriptor.SourceFingerprint, fingerprint, StringComparison.Ordinal) &&
@@ -111,6 +140,8 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or HttpRequestException or TaskCanceledException or ArgumentException or COMException)
         {
+            if (cancellationToken.IsCancellationRequested) throw;
+            DiagnosticLog.PreviewFallback(_logger, request.ResourceId, "Preview resolution threw an exception", exception);
             return Fallback(ResourceVisualMode.Auto, fingerprint);
         }
     }
@@ -366,6 +397,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
             if (!string.IsNullOrWhiteSpace(html))
             {
                 var metadata = FindVisualMetadata(html, pageUri);
+                DiagnosticLog.Metadata(_logger, pageUri.Host, metadata.Cover is not null, metadata.Icon is not null);
                 if (metadata.Cover is not null)
                 {
                     candidates.Add((metadata.Cover, true));
@@ -377,8 +409,9 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
                 }
             }
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException exception)
         {
+            DiagnosticLog.CandidateRejected(_logger, "HTML", pageUri.GetLeftPart(UriPartial.Path), "HTML request failed", exception);
         }
 
         candidates.Add((new Uri(pageUri, "/favicon.ico"), false));
@@ -404,6 +437,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
             }
             catch (Exception exception) when (exception is IOException or HttpRequestException or InvalidDataException or COMException)
             {
+                DiagnosticLog.CandidateRejected(_logger, "Image", candidate.Uri.GetLeftPart(UriPartial.Path), "Image download or validation failed", exception);
             }
         }
 
@@ -561,10 +595,12 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
     private async Task<string?> DownloadHtmlAsync(Uri uri, CancellationToken cancellationToken)
     {
         using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        DiagnosticLog.HttpResponse(_logger, "HTML", uri.GetLeftPart(UriPartial.Path), (int)response.StatusCode, response.Content.Headers.ContentType?.MediaType, response.Content.Headers.ContentLength);
         if (!response.IsSuccessStatusCode ||
             response.Content.Headers.ContentType?.MediaType?.Contains("html", StringComparison.OrdinalIgnoreCase) != true ||
             response.Content.Headers.ContentLength > MaximumHtmlBytes)
         {
+            DiagnosticLog.CandidateRejected(_logger, "HTML", uri.GetLeftPart(UriPartial.Path), "HTTP status, content type, or content length rejected");
             return null;
         }
 
@@ -581,10 +617,12 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         }
 
         using var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        DiagnosticLog.HttpResponse(_logger, "Image", uri.GetLeftPart(UriPartial.Path), (int)response.StatusCode, response.Content.Headers.ContentType?.MediaType, response.Content.Headers.ContentLength);
         if (!response.IsSuccessStatusCode ||
             response.Content.Headers.ContentType?.MediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) != true ||
             response.Content.Headers.ContentLength > MaximumRemoteAssetBytes)
         {
+            DiagnosticLog.CandidateRejected(_logger, "Image", uri.GetLeftPart(UriPartial.Path), "HTTP status, content type, or content length rejected");
             return null;
         }
 
@@ -644,7 +682,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         return true;
     }
 
-    private static async Task WriteValidatedImageAsync(string destination, byte[] bytes, CancellationToken cancellationToken)
+    private async Task WriteValidatedImageAsync(string destination, byte[] bytes, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $"{Guid.NewGuid():N}.tmp");
@@ -667,18 +705,19 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         }
     }
 
-    private static async Task<bool> IsDecodableImageAsync(string path, CancellationToken cancellationToken)
+    private async Task<bool> IsDecodableImageAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
-            var file = await StorageFile.GetFileFromPathAsync(path);
-            using var stream = await file.OpenReadAsync();
+            using var fileStream = File.OpenRead(path);
+            using var stream = fileStream.AsRandomAccessStream();
             _ = await BitmapDecoder.CreateAsync(stream);
             cancellationToken.ThrowIfCancellationRequested();
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or COMException)
         {
+            DiagnosticLog.CandidateRejected(_logger, "Decode", path, "Windows image decoder failed", exception);
             return false;
         }
     }

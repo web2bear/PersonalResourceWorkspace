@@ -13,4 +13,6 @@ public interface IWorkspaceRepository
     Task<IReadOnlyList<TaggedResourceRecord>> GetResourcesAsync(CancellationToken cancellationToken);
     Task SaveResourceAsync(TaggedResourceRecord resource, CancellationToken cancellationToken);
     Task DeleteResourceAsync(Guid id, CancellationToken cancellationToken);
+    Task<IReadOnlyDictionary<Guid, long>> GetResourceRanksAsync(Guid searchId, CancellationToken cancellationToken);
+    Task SaveResourceRanksAsync(Guid searchId, IReadOnlyList<Guid> orderedResourceIds, CancellationToken cancellationToken);
 }

@@ -241,4 +241,39 @@ internal sealed class SqliteWorkspaceRepository(ISqliteConnectionFactory connect
         command.Parameters.AddWithValue("$id", id.ToString());
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    public async Task<IReadOnlyDictionary<Guid, long>> GetResourceRanksAsync(Guid searchId, CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT ResourceId, Rank FROM SearchResourceRanks WHERE SearchId=$searchId;";
+        command.Parameters.AddWithValue("$searchId", searchId.ToString());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var ranks = new Dictionary<Guid, long>();
+        while (await reader.ReadAsync(cancellationToken)) ranks.Add(Guid.Parse(reader.GetString(0)), reader.GetInt64(1));
+        return ranks;
+    }
+
+    public async Task SaveResourceRanksAsync(Guid searchId, IReadOnlyList<Guid> orderedResourceIds, CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM SearchResourceRanks WHERE SearchId=$searchId;";
+        command.Parameters.AddWithValue("$searchId", searchId.ToString());
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        long nextRank = 0;
+        command.CommandText = "INSERT INTO SearchResourceRanks(SearchId,ResourceId,Rank) VALUES($searchId,$resourceId,$rank) " +
+                              "ON CONFLICT(SearchId,ResourceId) DO UPDATE SET Rank=excluded.Rank;";
+        command.Parameters.Add("$resourceId", SqliteType.Text);
+        command.Parameters.Add("$rank", SqliteType.Integer);
+        foreach (var id in orderedResourceIds.Distinct())
+        {
+            command.Parameters["$resourceId"].Value = id.ToString();
+            command.Parameters["$rank"].Value = nextRank++;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
 }
