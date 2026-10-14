@@ -1007,6 +1007,9 @@ public sealed partial class MainPage : Page
         var fields = new StackPanel { Spacing = 14, MinWidth = 420 };
         fields.Children.Add(titleBox);
         fields.Children.Add(descriptionBox);
+        fields.Children.Add(new TextBlock { Text = "Тэги" });
+        fields.Children.Add(tagChips);
+        fields.Children.Add(tagInput);
         fields.Children.Add(kindBox);
         fields.Children.Add(addressBox);
         fields.Children.Add(addressHint);
@@ -1015,15 +1018,19 @@ public sealed partial class MainPage : Page
         fields.Children.Add(visualStatus);
         fields.Children.Add(visualButtons);
         fields.Children.Add(validationText);
-        fields.Children.Add(new TextBlock { Text = "Тэги" });
-        fields.Children.Add(tagChips);
-        fields.Children.Add(tagInput);
+
+        var scrollableFields = new ScrollViewer
+        {
+            Content = fields,
+            MaxHeight = 520,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
 
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
             Title = isNew ? "Добавить ресурс" : "Редактировать ресурс",
-            Content = fields,
+            Content = scrollableFields,
             PrimaryButtonText = isNew ? "Добавить" : "Сохранить",
             SecondaryButtonText = "Открыть",
             IsSecondaryButtonEnabled = true,
