@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging" />
     <ProjectReference Include="..\PersonalResourceWorkspace.Domain\PersonalResourceWorkspace.Domain.csproj" />
   </ItemGroup>
 </Project>

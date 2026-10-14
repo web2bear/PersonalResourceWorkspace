@@ -39,6 +39,7 @@ public sealed partial class MainPage
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             StatusText.Text = $"Не удалось загрузить тэги и поиски: {exception.Message}";
         }
     }
@@ -198,6 +199,7 @@ public sealed partial class MainPage
             }
             catch (Exception exception)
             {
+                LogOperationFailure(exception);
                 StatusText.Text = $"Не удалось начать перетаскивание: {exception.Message}";
             }
         }), true);
@@ -276,6 +278,138 @@ public sealed partial class MainPage
             args.Data.Properties["ResourceId"] = resource.Id.ToString();
     }
 
+    private void Resources_DragOver(object sender, DragEventArgs args)
+    {
+        if (_sortMode != ResourceSortMode.Manual || _activeSearchId is null ||
+            !TryGetDraggedResource(args.DataView.Properties, out var id) ||
+            FilteredResources.All(resource => resource.Id != id))
+        {
+            HideResourceDropMarker();
+            return;
+        }
+        args.AcceptedOperation = DataPackageOperation.Move;
+        args.Handled = true;
+        ShowResourceDropMarker(sender, args);
+    }
+
+    private void Resources_DragLeave(object sender, DragEventArgs args)
+    {
+        if (sender is not FrameworkElement area) return;
+        var point = args.GetPosition(area);
+        if (point.X < 0 || point.Y < 0 || point.X > area.ActualWidth || point.Y > area.ActualHeight)
+            HideResourceDropMarker();
+    }
+
+    private void Resources_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args) =>
+        HideResourceDropMarker();
+
+    private void HideResourceDropMarker() => ResourceDropMarker.Visibility = Visibility.Collapsed;
+
+    private void ShowResourceDropMarker(object sender, DragEventArgs args)
+    {
+        var (target, _, after) = ResourceDropTarget(sender, args);
+        if (target is null)
+        {
+            HideResourceDropMarker();
+            return;
+        }
+
+        var origin = target.TransformToVisual(ResourceDropOverlay).TransformPoint(new global::Windows.Foundation.Point());
+        if (sender is GridView)
+        {
+            ResourceDropMarker.Width = 4;
+            ResourceDropMarker.Height = Math.Max(16, target.ActualHeight - 8);
+            Canvas.SetLeft(ResourceDropMarker, origin.X + (after ? target.ActualWidth - 2 : -2));
+            Canvas.SetTop(ResourceDropMarker, origin.Y + 4);
+        }
+        else
+        {
+            ResourceDropMarker.Width = Math.Max(16, target.ActualWidth - 8);
+            ResourceDropMarker.Height = 4;
+            Canvas.SetLeft(ResourceDropMarker, origin.X + 4);
+            Canvas.SetTop(ResourceDropMarker, origin.Y + (after ? target.ActualHeight - 2 : -2));
+        }
+        ResourceDropMarker.Visibility = Visibility.Visible;
+    }
+
+    private (FrameworkElement? Target, int Index, bool After) ResourceDropTarget(object sender, DragEventArgs args)
+    {
+        if (sender is not ListViewBase view) return (null, -1, false);
+
+        // OriginalSource is often the view's scroll surface during a drag, even above a card.
+        // Use realized item bounds so the preview and the final drop choose the same slot.
+        var pointer = args.GetPosition(view);
+        FrameworkElement? nearest = null;
+        var nearestIndex = -1;
+        global::Windows.Foundation.Point nearestOrigin = default;
+        var nearestDistance = double.PositiveInfinity;
+        for (var index = 0; index < FilteredResources.Count; index++)
+        {
+            if (view.ContainerFromIndex(index) is not FrameworkElement item ||
+                item.ActualWidth <= 0 || item.ActualHeight <= 0) continue;
+            var origin = item.TransformToVisual(view).TransformPoint(new global::Windows.Foundation.Point());
+            var dx = Math.Max(origin.X - pointer.X, Math.Max(0, pointer.X - origin.X - item.ActualWidth));
+            var dy = Math.Max(origin.Y - pointer.Y, Math.Max(0, pointer.Y - origin.Y - item.ActualHeight));
+            var distance = dx * dx + dy * dy;
+            if (distance >= nearestDistance) continue;
+            nearest = item;
+            nearestIndex = index;
+            nearestOrigin = origin;
+            nearestDistance = distance;
+        }
+        if (nearest is null) return (null, -1, false);
+        var after = sender is GridView
+            ? pointer.X >= nearestOrigin.X + nearest.ActualWidth / 2
+            : pointer.Y >= nearestOrigin.Y + nearest.ActualHeight / 2;
+        return (nearest, nearestIndex, after);
+    }
+
+    private async void Resources_Drop(object sender, DragEventArgs args)
+    {
+        HideResourceDropMarker();
+        if (_sortMode != ResourceSortMode.Manual || _activeSearchId is not { } searchId ||
+            !TryGetDraggedResource(args.DataView.Properties, out var sourceId)) return;
+        args.Handled = true;
+        var visibleIds = FilteredResources.Select(resource => resource.Id).ToList();
+        if (!visibleIds.Remove(sourceId)) return;
+
+        var (_, targetSlot, after) = ResourceDropTarget(sender, args);
+        var targetId = targetSlot >= 0 ? FilteredResources[targetSlot].Id : Guid.Empty;
+        if (targetId == sourceId) return;
+        var targetIndex = visibleIds.IndexOf(targetId);
+        if (targetIndex < 0) targetIndex = visibleIds.Count;
+        else if (after) targetIndex++;
+        visibleIds.Insert(targetIndex, sourceId);
+
+        // Replace only visible positions; retain the slots of temporarily unmatched resources.
+        var allIds = _activeResourceRanks.OrderBy(pair => pair.Value).ThenBy(pair => pair.Key)
+            .Select(pair => pair.Key).ToList();
+        var visibleSet = visibleIds.ToHashSet();
+        var nextVisible = 0;
+        for (var index = 0; index < allIds.Count; index++)
+            if (visibleSet.Contains(allIds[index])) allIds[index] = visibleIds[nextVisible++];
+        allIds.AddRange(visibleIds.Skip(nextVisible));
+
+        try
+        {
+            await _workspaceRepository.SaveResourceRanksAsync(searchId, allIds, CancellationToken.None);
+            if (_activeSearchId != searchId) return;
+            await LoadResourceRanksAsync(searchId);
+            ApplyFilter();
+        }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = $"Не удалось сохранить порядок карточек: {exception.Message}";
+        }
+    }
+
+    private static bool TryGetDraggedResource(DataPackagePropertySetView properties, out Guid id)
+    {
+        id = Guid.Empty;
+        return properties.TryGetValue("ResourceId", out var value) && Guid.TryParse(value as string, out id);
+    }
+
     private async Task ShiftSearchAsync(SavedSearchRecord search, int direction)
     {
         var siblings = _searches.Where(item => item.ParentId == search.ParentId).OrderBy(item => item.SortOrder).ToList();
@@ -319,6 +453,7 @@ public sealed partial class MainPage
         }
         catch (Exception exception)
         {
+            LogOperationFailure(exception);
             await LoadWorkspaceNavAsync();
             await ShowMessageAsync("Не удалось переместить поиск", exception.Message);
         }

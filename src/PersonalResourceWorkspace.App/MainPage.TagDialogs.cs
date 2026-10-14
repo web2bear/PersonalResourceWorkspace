@@ -55,7 +55,11 @@ public sealed partial class MainPage
             UpdateTagFilterChips();
             ApplyFilter();
         }
-        catch (Exception exception) { StatusText.Text = exception.Message; }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            StatusText.Text = exception.Message;
+        }
     }
 
     private async Task<TagRecord> GetOrCreateTagAsync(string name)
@@ -178,7 +182,11 @@ public sealed partial class MainPage
             UpdateTagFilterChips();
             ApplyFilter();
         }
-        catch (Exception exception) { await ShowMessageAsync("Не удалось сохранить поиск", exception.Message); }
+        catch (Exception exception)
+        {
+            LogOperationFailure(exception);
+            await ShowMessageAsync("Не удалось сохранить поиск", exception.Message);
+        }
     }
 
     private async void ManageTags_Click(object sender, RoutedEventArgs e) => await ManageTagsAsync();
@@ -237,7 +245,11 @@ public sealed partial class MainPage
                 UpdateTagFilterChips();
                 ApplyFilter();
             }
-            catch (Exception exception) { await ShowMessageAsync("Не удалось изменить тэг", exception.Message); }
+            catch (Exception exception)
+            {
+                LogOperationFailure(exception);
+                await ShowMessageAsync("Не удалось изменить тэг", exception.Message);
+            }
         }
     }
 

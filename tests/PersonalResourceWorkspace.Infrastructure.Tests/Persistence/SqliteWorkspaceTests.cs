@@ -29,6 +29,49 @@ public sealed class SqliteWorkspaceTests : IAsyncLifetime
     private IWorkspaceRepository Repository => _provider!.GetRequiredService<IWorkspaceRepository>();
 
     [Fact]
+    public async Task ManualRanksSurviveSearchMismatchAndCascadeOnPermanentDeletion()
+    {
+        var search = NewSearch("Проект", [SystemTags.InboxId]);
+        await Repository.SaveSearchAsync(search, CancellationToken.None);
+        var first = NewResource([SystemTags.InboxId]);
+        var second = NewResource([SystemTags.InboxId]);
+        await Repository.SaveResourceAsync(first, CancellationToken.None);
+        await Repository.SaveResourceAsync(second, CancellationToken.None);
+        await Repository.SaveResourceRanksAsync(search.Id, [second.Id, first.Id], CancellationToken.None);
+
+        await Repository.SaveResourceAsync(first with { TagIds = [SystemTags.TrashId] }, CancellationToken.None);
+        var ranks = await Repository.GetResourceRanksAsync(search.Id, CancellationToken.None);
+        Assert.Equal(0, ranks[second.Id]);
+        Assert.Equal(1, ranks[first.Id]);
+
+        await Repository.DeleteResourceAsync(second.Id, CancellationToken.None);
+        ranks = await Repository.GetResourceRanksAsync(search.Id, CancellationToken.None);
+        Assert.DoesNotContain(second.Id, ranks.Keys);
+        Assert.Equal(1, ranks[first.Id]);
+        await Repository.DeleteSearchTreeAsync(search.Id, CancellationToken.None);
+        Assert.Empty(await Repository.GetResourceRanksAsync(search.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ResourcesWithWebsiteScreenshotsCanBeLoadedAlongsideOtherResources()
+    {
+        var screenshot = NewResource([SystemTags.InboxId]);
+        await Repository.SaveResourceAsync(screenshot, CancellationToken.None);
+        await Repository.SaveResourceAsync(NewResource([SystemTags.InboxId]), CancellationToken.None);
+        await using var connection = new SqliteConnection($"Data Source={DatabasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Resources SET VisualOrigin='WebsiteScreenshot' WHERE Id=$id;";
+        command.Parameters.AddWithValue("$id", screenshot.Id.ToString());
+        await command.ExecuteNonQueryAsync();
+
+        var resources = await Repository.GetResourcesAsync(CancellationToken.None);
+
+        Assert.Equal(2, resources.Count);
+        Assert.Equal(ResourceVisualOrigin.WebsiteScreenshot, resources.Single(item => item.Id == screenshot.Id).Visual.Origin);
+    }
+
+    [Fact]
     public async Task NewDatabaseHasOnlySystemTagsAndSearches()
     {
         var tags = await Repository.GetTagsAsync(CancellationToken.None);
