@@ -102,7 +102,12 @@ public sealed partial class MainPage
             CanDrag = !search.IsSystem,
         };
         AutomationProperties.SetName(item, search.Name);
-        item.DragStarting += (_, args) => args.Data.Properties["SearchId"] = search.Id.ToString();
+        item.DragStarting += (_, args) =>
+        {
+            args.Data.Properties["SearchId"] = search.Id.ToString();
+            args.Data.RequestedOperation = DataPackageOperation.Move;
+        };
+        AttachSearchDragGesture(item, search);
         item.DragOver += (_, args) =>
         {
             if (args.DataView.Properties.ContainsKey("ResourceId"))
@@ -154,6 +159,42 @@ public sealed partial class MainPage
             AddSearchMenuItem(flyout, "Очистить корзину", EmptyTagTrashAsync);
         item.ContextFlyout = flyout;
         return item;
+    }
+
+    private void AttachSearchDragGesture(NavigationViewItem item, SavedSearchRecord search)
+    {
+        if (search.IsSystem) return;
+        global::Windows.Foundation.Point? pressedAt = null;
+        var dragStarted = false;
+        item.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, args) =>
+        {
+            var point = args.GetCurrentPoint(item);
+            pressedAt = point.Properties.IsLeftButtonPressed ? point.Position : null;
+            dragStarted = false;
+        }), true);
+        item.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => pressedAt = null), true);
+        item.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) => pressedAt = null), true);
+        item.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(async (_, args) =>
+        {
+            if (pressedAt is not { } start || dragStarted) return;
+            var point = args.GetCurrentPoint(item);
+            if (!point.Properties.IsLeftButtonPressed)
+            {
+                pressedAt = null;
+                return;
+            }
+            if (Math.Abs(point.Position.X - start.X) < 8 && Math.Abs(point.Position.Y - start.Y) < 8) return;
+            dragStarted = true;
+            pressedAt = null;
+            try
+            {
+                await item.StartDragAsync(point);
+            }
+            catch (Exception exception)
+            {
+                StatusText.Text = $"Не удалось начать перетаскивание: {exception.Message}";
+            }
+        }), true);
     }
 
     private static bool TryGetDraggedSearch(DataPackagePropertySetView properties, out Guid id)
