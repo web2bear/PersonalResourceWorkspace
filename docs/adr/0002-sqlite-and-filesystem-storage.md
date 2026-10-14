@@ -19,4 +19,4 @@ The implemented schema stores resource visual mode, resolved kind, origin, sourc
 
 Database and asset changes spanning both stores will require an explicit transaction/compensation strategy. Integration tests use isolated temporary roots. Backup and export can later include one database plus its asset tree without introducing cloud dependencies.
 
-Remote web discovery is an optional, bounded enhancement: it uses no browser cookies, does not execute page scripts, and falls back to the type glyph when metadata, network access, or image decoding fails. User-selected assets always take precedence over automatic refresh.
+Remote web discovery is an optional, bounded enhancement. The screenshot path opens the page in a temporary headless Edge profile and executes page scripts; metadata and favicon fallback uses HTTP without browser cookies. Capture, network, or image decoding failures fall back to another available visual or the type glyph. User-selected assets always take precedence over automatic refresh.

@@ -1,7 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using PersonalResourceWorkspace.Application.Abstractions;
@@ -19,6 +20,8 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
     private const long MaximumUserAssetBytes = 20 * 1024 * 1024;
     private const int MaximumRemoteAssetBytes = 10 * 1024 * 1024;
     private const int MaximumHtmlBytes = 512 * 1024;
+    private const int MaximumScreenshotBytes = 512 * 1024;
+    private static readonly SemaphoreSlim ScreenshotGate = new(2, 2);
     private const string ShellVisualCacheVersion = "shell-visual-v3";
     private const byte VisibleIconAlphaThreshold = 80;
     private static readonly string[] SupportedExtensions =
@@ -69,7 +72,8 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
             request.Descriptor.Mode == ResourceVisualMode.Auto &&
             string.Equals(request.Descriptor.SourceFingerprint, fingerprint, StringComparison.Ordinal) &&
             cachedPath is not null &&
-            File.Exists(cachedPath))
+            File.Exists(cachedPath) &&
+            await IsDecodableImageAsync(cachedPath, cancellationToken).ConfigureAwait(false))
         {
             return new ResourceVisualResolution(request.Descriptor, cachedPath, null, SourceLabel(request.Descriptor.Origin));
         }
@@ -182,6 +186,11 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
 
         var extension = Path.GetExtension(address).ToLowerInvariant();
         var destination = CachePath(fingerprint, extension);
+        if (File.Exists(destination) &&
+            !await IsDecodableImageAsync(destination, cancellationToken).ConfigureAwait(false))
+        {
+            File.Delete(destination);
+        }
         await CopyIfMissingAsync(address, destination, cancellationToken).ConfigureAwait(false);
         return Resolution(destination, ResourceVisualKind.Image, ResourceVisualOrigin.Payload, fingerprint, "Изображение ресурса");
     }
@@ -345,6 +354,12 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         }
 
         var candidates = new List<(Uri Uri, bool IsCover)>();
+        var screenshot = await ResolveWebScreenshotAsync(pageUri, fingerprint, cancellationToken).ConfigureAwait(false);
+        if (screenshot is not null)
+        {
+            return screenshot;
+        }
+
         try
         {
             var html = await DownloadHtmlAsync(pageUri, cancellationToken).ConfigureAwait(false);
@@ -393,6 +408,154 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         }
 
         return null;
+    }
+
+    private async Task<ResourceVisualResolution?> ResolveWebScreenshotAsync(
+        Uri pageUri,
+        string fingerprint,
+        CancellationToken cancellationToken)
+    {
+        await ScreenshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var edgePath = FindEdgePath();
+            if (edgePath is null)
+            {
+                return null;
+            }
+
+            var temporaryRoot = Path.Combine(GetVisualRoot(), "browser-temp", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temporaryRoot);
+            try
+            {
+                var screenshotPath = Path.Combine(temporaryRoot, "screenshot.png");
+                var profilePath = Path.Combine(temporaryRoot, "profile");
+                var startInfo = new ProcessStartInfo(edgePath)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    WorkingDirectory = temporaryRoot,
+                };
+                startInfo.ArgumentList.Add("--headless");
+                startInfo.ArgumentList.Add("--disable-gpu");
+                startInfo.ArgumentList.Add("--no-first-run");
+                startInfo.ArgumentList.Add("--hide-scrollbars");
+                startInfo.ArgumentList.Add("--window-size=480,300");
+                startInfo.ArgumentList.Add("--timeout=8000");
+                startInfo.ArgumentList.Add($"--user-data-dir={profilePath}");
+                startInfo.ArgumentList.Add($"--screenshot={screenshotPath}");
+                startInfo.ArgumentList.Add(pageUri.AbsoluteUri);
+
+                using var process = Process.Start(startInfo);
+                if (process is null)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(18));
+                    await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                }
+
+                if (process.ExitCode != 0 || !File.Exists(screenshotPath))
+                {
+                    return null;
+                }
+
+                var bytes = await EncodeSmallJpegAsync(screenshotPath, cancellationToken).ConfigureAwait(false);
+                if (bytes.Length is 0 or > MaximumScreenshotBytes)
+                {
+                    return null;
+                }
+
+                var destination = CachePath(fingerprint, ".jpg");
+                await WriteValidatedImageAsync(destination, bytes, cancellationToken).ConfigureAwait(false);
+                return Resolution(destination, ResourceVisualKind.Image, ResourceVisualOrigin.WebsiteScreenshot,
+                    fingerprint, "Скриншот сайта");
+            }
+            finally
+            {
+                try { Directory.Delete(temporaryRoot, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or COMException or InvalidDataException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            ScreenshotGate.Release();
+        }
+    }
+
+    private static string? FindEdgePath()
+    {
+        string?[] candidates =
+        [
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft", "Edge", "Application", "msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft", "Edge", "Application", "msedge.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Edge", "Application", "msedge.exe"),
+        ];
+        return candidates.FirstOrDefault(static path => path is not null && File.Exists(path));
+    }
+
+    private static async Task<byte[]> EncodeSmallJpegAsync(string screenshotPath, CancellationToken cancellationToken)
+    {
+        if (new FileInfo(screenshotPath).Length > 5 * 1024 * 1024)
+        {
+            return [];
+        }
+
+        var file = await StorageFile.GetFileFromPathAsync(screenshotPath);
+        using var input = await file.OpenReadAsync();
+        var decoder = await BitmapDecoder.CreateAsync(input);
+        if (decoder.PixelWidth > 1600 || decoder.PixelHeight > 1000)
+        {
+            return [];
+        }
+
+        var scale = Math.Min(1d, Math.Min(480d / decoder.PixelWidth, 300d / decoder.PixelHeight));
+        var width = (uint)Math.Max(1, Math.Round(decoder.PixelWidth * scale));
+        var height = (uint)Math.Max(1, Math.Round(decoder.PixelHeight * scale));
+        var pixels = await decoder.GetPixelDataAsync(
+            BitmapPixelFormat.Bgra8,
+            BitmapAlphaMode.Ignore,
+            new BitmapTransform { ScaledWidth = width, ScaledHeight = height },
+            ExifOrientationMode.IgnoreExifOrientation,
+            ColorManagementMode.ColorManageToSRgb);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var output = new InMemoryRandomAccessStream();
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, output);
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, width, height,
+            decoder.DpiX, decoder.DpiY, pixels.DetachPixelData());
+        await encoder.FlushAsync();
+        if (output.Size > MaximumScreenshotBytes)
+        {
+            return [];
+        }
+
+        using var reader = new DataReader(output.GetInputStreamAt(0));
+        var loaded = await reader.LoadAsync((uint)output.Size);
+        var bytes = new byte[loaded];
+        reader.ReadBytes(bytes);
+        return bytes;
     }
 
     private async Task<string?> DownloadHtmlAsync(Uri uri, CancellationToken cancellationToken)
@@ -484,7 +647,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
     private static async Task WriteValidatedImageAsync(string destination, byte[] bytes, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        var temporary = destination + $".{Guid.NewGuid():N}.tmp";
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $"{Guid.NewGuid():N}.tmp");
         try
         {
             await File.WriteAllBytesAsync(temporary, bytes, cancellationToken).ConfigureAwait(false);
@@ -680,6 +843,7 @@ internal sealed class WindowsResourceVisualService : IResourceVisualService, IDi
         ResourceVisualOrigin.Payload => "Изображение ресурса",
         ResourceVisualOrigin.WindowsShell => "Значок Windows",
         ResourceVisualOrigin.RemoteMetadata => "Изображение сайта",
+        ResourceVisualOrigin.WebsiteScreenshot => "Скриншот сайта",
         ResourceVisualOrigin.Generated => "Предпросмотр",
         _ => "Значок типа",
     };

@@ -23,6 +23,7 @@ public enum ResourceVisualOrigin
     RemoteMetadata,
     Generated,
     Fallback,
+    WebsiteScreenshot,
 }
 
 public sealed record ResourceVisualDescriptor(
